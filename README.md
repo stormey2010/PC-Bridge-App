@@ -99,7 +99,24 @@ To check it:
 
 ## Updating
 
-Download the newer installer from [Releases](https://github.com/stormey2010/PC-Bridge-App/releases) and run it. Your settings and protected credential are preserved during upgrades.
+### Easy update (recommended)
+
+1. Open **PC Bridge Agent**.
+2. Go to **Settings**.
+3. Select **Check for updates**.
+4. If a newer version is listed, select **Download & install update**.
+5. Approve the Windows administrator prompt and finish the installer.
+6. Reopen PC Bridge Agent when setup completes.
+
+Your Home Assistant URL, settings, allowlists, and encrypted token are kept.
+
+### Manual update
+
+Download the newer installer from [Releases](https://github.com/stormey2010/PC-Bridge-App/releases) and run it.
+
+### Home Assistant integration
+
+Update the HA side separately with HACS (see the [PC Bridge HA README](https://github.com/stormey2010/PC-Bridge-HA#updating)). In the app, **Settings → How to update HA** shows the same steps.
 
 ## Uninstalling
 

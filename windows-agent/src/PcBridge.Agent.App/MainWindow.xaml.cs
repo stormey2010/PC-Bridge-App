@@ -27,6 +27,9 @@ public partial class MainWindow : Window
     private CheckBox? _startupCheck;
     private TextBox? _fastIntervalBox;
     private TextBox? _staticIntervalBox;
+    private UpdateInfo? _updateInfo;
+    private TextBlock? _updateStatusLabel;
+    private Button? _installUpdateButton;
     private readonly string _dataDirectory = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "PC Bridge Agent");
 
     public MainWindow(AgentSettings settings, SettingsStore settingsStore, ICredentialStore credentials, bool demo = false)
@@ -36,13 +39,18 @@ public partial class MainWindow : Window
         _settingsStore = settingsStore;
         _credentials = credentials;
         _demo = demo;
+        VersionFooter.Text = $"Agent {UpdateChecker.CurrentVersion}  •  Protocol 1";
         PageContent.Content = BuildOverview();
         RefreshServiceStatus();
         _statusTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
         _statusTimer.Tick += (_, _) => RefreshServiceStatus();
         _statusTimer.Start();
         Closed += (_, _) => _statusTimer.Stop();
-        Loaded += async (_, _) => await EnsureServiceInstalledAsync(promptIfMissing: true);
+        Loaded += async (_, _) =>
+        {
+            await EnsureServiceInstalledAsync(promptIfMissing: true);
+            await CheckForUpdatesQuietAsync();
+        };
     }
 
     private void Navigate_Click(object sender, RoutedEventArgs e)
@@ -107,6 +115,8 @@ public partial class MainWindow : Window
         var activityContent = Stack();
         activityContent.Children.Add(Label("Get started", 16));
         activityContent.Children.Add(Body("Edit the Home Assistant connection and choose Sensors and Controls. The agent reloads settings automatically; use Restart agent only if the service is stuck."));
+        if (_updateInfo?.IsUpdateAvailable == true)
+            activityContent.Children.Add(Body($"Update available: v{_updateInfo.LatestVersion}. Open Settings → Check for updates to install."));
         activity.Child = activityContent;
         lower.Children.Add(activity);
         var security = Card();
@@ -266,11 +276,128 @@ public partial class MainWindow : Window
         intervalStack.Children.Add(Body("Slow sensors (keep awake, storage): seconds between samples."));
         intervalStack.Children.Add(_staticIntervalBox);
         intervals.Child = intervalStack;
+
+        var updates = Card();
+        var updateStack = Stack();
+        updateStack.Children.Add(Label("Software updates", 16));
+        updateStack.Children.Add(Body("Check GitHub for a newer PC Bridge Agent installer. Settings and your encrypted token are kept when you upgrade."));
+        _updateStatusLabel = Body(FormatUpdateStatus());
+        updateStack.Children.Add(_updateStatusLabel);
+        _installUpdateButton = MakeButton("Download & install update", true);
+        _installUpdateButton.IsEnabled = _updateInfo?.IsUpdateAvailable == true && !string.IsNullOrWhiteSpace(_updateInfo.InstallerUrl);
+        _installUpdateButton.Click += InstallUpdate_Click;
+        var updateButtons = new StackPanel { Orientation = Orientation.Horizontal, Margin = new(0, 10, 0, 0) };
+        var checkBtn = MakeButton("Check for updates", true);
+        checkBtn.Click += CheckForUpdates_Click;
+        var releaseBtn = MakeButton("Open releases page", false);
+        releaseBtn.Click += (_, _) => UpdateChecker.OpenUrl(_updateInfo?.ReleaseUrl ?? UpdateChecker.AppReleasesUrl);
+        var haBtn = MakeButton("How to update HA", false);
+        haBtn.Click += (_, _) => MessageBox.Show(
+            $"{UpdateChecker.HaHacsHint}\n\nOr open: {UpdateChecker.HaReleasesUrl}",
+            "Update Home Assistant integration",
+            MessageBoxButton.OK,
+            MessageBoxImage.Information);
+        updateButtons.Children.Add(checkBtn);
+        updateButtons.Children.Add(_installUpdateButton);
+        updateButtons.Children.Add(releaseBtn);
+        updateButtons.Children.Add(haBtn);
+        updateStack.Children.Add(updateButtons);
+        updates.Child = updateStack;
+
         return Page("Settings", "These settings are saved locally on this PC.",
             _startupCheck,
             _privacyCheck,
             intervals,
+            updates,
             ActionBar(("Save settings", SaveGeneralSettings_Click, true), ("Open Windows Services", OpenServices_Click, false)));
+    }
+
+    private string FormatUpdateStatus()
+    {
+        if (_updateInfo is null) return $"Installed version: {UpdateChecker.CurrentVersion}. Not checked yet.";
+        if (_updateInfo.IsUpdateAvailable)
+            return $"Installed: {_updateInfo.CurrentVersion}  →  Latest: {_updateInfo.LatestVersion}. An update is available.";
+        return $"Installed: {_updateInfo.CurrentVersion}. You are up to date.";
+    }
+
+    private async Task CheckForUpdatesQuietAsync()
+    {
+        if (_demo) return;
+        try
+        {
+            _updateInfo = await UpdateChecker.CheckAsync();
+            if (PageTitle.Text is "Overview" or "Settings")
+                PageContent.Content = PageTitle.Text == "Overview" ? BuildOverview() : BuildSettings();
+        }
+        catch
+        {
+            // Quiet background check — user can retry from Settings.
+        }
+    }
+
+    private async void CheckForUpdates_Click(object sender, RoutedEventArgs e)
+    {
+        if (_demo)
+        {
+            MessageBox.Show("Demo mode cannot check GitHub for updates.", "Updates", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        try
+        {
+            if (_updateStatusLabel is not null) _updateStatusLabel.Text = "Checking GitHub for the latest release…";
+            _updateInfo = await UpdateChecker.CheckAsync();
+            if (_updateStatusLabel is not null) _updateStatusLabel.Text = FormatUpdateStatus();
+            if (_installUpdateButton is not null)
+                _installUpdateButton.IsEnabled = _updateInfo.IsUpdateAvailable && !string.IsNullOrWhiteSpace(_updateInfo.InstallerUrl);
+            if (_updateInfo.IsUpdateAvailable)
+                MessageBox.Show($"Version {_updateInfo.LatestVersion} is available.\n\nSelect Download & install update to upgrade. Your settings and token stay on this PC.", "Update available", MessageBoxButton.OK, MessageBoxImage.Information);
+            else
+                MessageBox.Show($"You already have the latest version ({_updateInfo.CurrentVersion}).", "Up to date", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Could not check for updates.\n\n{ex.Message}\n\nYou can still download from:\n{UpdateChecker.AppReleasesUrl}", "Update check failed", MessageBoxButton.OK, MessageBoxImage.Warning);
+            UpdateChecker.OpenUrl(UpdateChecker.AppReleasesUrl);
+        }
+    }
+
+    private async void InstallUpdate_Click(object sender, RoutedEventArgs e)
+    {
+        if (_updateInfo is null || !_updateInfo.IsUpdateAvailable || string.IsNullOrWhiteSpace(_updateInfo.InstallerUrl))
+        {
+            MessageBox.Show("Check for updates first.", "No update ready", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        if (MessageBox.Show(
+                $"Download and install PC Bridge Agent {_updateInfo.LatestVersion}?\n\nThe installer will ask for administrator approval. Close this window after the installer starts if it asks you to.",
+                "Install update",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question) != MessageBoxResult.Yes)
+            return;
+        try
+        {
+            if (_updateStatusLabel is not null) _updateStatusLabel.Text = "Downloading installer…";
+            if (_installUpdateButton is not null) _installUpdateButton.IsEnabled = false;
+            var progress = new Progress<double>(p =>
+            {
+                if (_updateStatusLabel is not null) _updateStatusLabel.Text = $"Downloading installer… {p:0}%";
+            });
+            var path = await UpdateChecker.DownloadInstallerAsync(_updateInfo.InstallerUrl, progress);
+            if (_updateStatusLabel is not null) _updateStatusLabel.Text = "Starting installer…";
+            UpdateChecker.LaunchInstaller(path);
+            MessageBox.Show("The installer started. Approve the Windows prompt, finish setup, then reopen PC Bridge Agent.", "Installer started", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (Win32Exception)
+        {
+            MessageBox.Show("Administrator approval was cancelled. The update was not installed.", "Cancelled", MessageBoxButton.OK, MessageBoxImage.Information);
+            if (_installUpdateButton is not null) _installUpdateButton.IsEnabled = true;
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Download or install failed.\n\n{ex.Message}\n\nOpening the releases page instead.", "Update failed", MessageBoxButton.OK, MessageBoxImage.Warning);
+            UpdateChecker.OpenUrl(_updateInfo.ReleaseUrl);
+            if (_installUpdateButton is not null) _installUpdateButton.IsEnabled = true;
+        }
     }
 
     private FrameworkElement BuildComingSoon(string title) => Page(title, "This feature is not implemented in the current release.",
