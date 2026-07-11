@@ -38,20 +38,20 @@ public sealed class PowerCommandHandler : ICommandHandler
     {
         // LockWorkStation fails in session 0 — run it on the interactive desktop.
         var rundll = Path.Combine(Environment.SystemDirectory, "rundll32.exe");
-        return InteractiveProcess.Launch("Lock", rundll, "user32.dll,LockWorkStation", requiresElevation: false);
+        return InteractiveProcess.Launch("Lock", rundll, "user32.dll,LockWorkStation", requiresElevation: false, hidden: true);
     }
 
     private static CommandResult LogOffSession()
     {
         var shutdown = Path.Combine(Environment.SystemDirectory, "shutdown.exe");
-        return InteractiveProcess.Launch("Log off", shutdown, "/l", requiresElevation: false);
+        return InteractiveProcess.Launch("Log off", shutdown, "/l", requiresElevation: false, hidden: true);
     }
 
     private static CommandResult DisplayOff()
     {
         var powershell = Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe");
         const string script = "(Add-Type '[DllImport(\"user32.dll\")] public static extern int SendMessage(int h,int m,int w,int l);' -Name W -Pas)::SendMessage(-1,0x0112,0xF170,2)";
-        return InteractiveProcess.Launch("Display off", powershell, $"-NoProfile -WindowStyle Hidden -Command \"{script}\"", requiresElevation: false);
+        return InteractiveProcess.Launch("Display off", powershell, $"-NoProfile -WindowStyle Hidden -Command \"{script}\"", requiresElevation: false, hidden: true);
     }
 
     private static async Task<CommandResult> RunShutdownAsync(string arguments, string success, CancellationToken cancellationToken)

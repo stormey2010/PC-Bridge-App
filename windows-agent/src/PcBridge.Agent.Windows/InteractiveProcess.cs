@@ -11,12 +11,12 @@ namespace PcBridge.Agent.Windows;
 /// </summary>
 public static class InteractiveProcess
 {
-    public static CommandResult Launch(string name, string executablePath, string arguments, bool requiresElevation) =>
-        LaunchCore(name, executablePath, arguments, requiresElevation, wait: false, outFile: null);
+    public static CommandResult Launch(string name, string executablePath, string arguments, bool requiresElevation, bool hidden = false) =>
+        LaunchCore(name, executablePath, arguments, requiresElevation, wait: false, outFile: null, timeout: null, hidden);
 
     /// <summary>Run a process in the active user session and wait for exit (optionally writing JSON to outFile).</summary>
-    public static CommandResult Run(string name, string executablePath, string arguments, TimeSpan timeout, string? outFile = null) =>
-        LaunchCore(name, executablePath, arguments, requiresElevation: false, wait: true, outFile, timeout);
+    public static CommandResult Run(string name, string executablePath, string arguments, TimeSpan timeout, string? outFile = null, bool hidden = true) =>
+        LaunchCore(name, executablePath, arguments, requiresElevation: false, wait: true, outFile, timeout, hidden);
 
     public static bool IsServiceSession()
     {
@@ -40,7 +40,7 @@ public static class InteractiveProcess
         return candidates.Select(Path.GetFullPath).FirstOrDefault(File.Exists);
     }
 
-    private static CommandResult LaunchCore(string name, string executablePath, string arguments, bool requiresElevation, bool wait, string? outFile, TimeSpan? timeout = null)
+    private static CommandResult LaunchCore(string name, string executablePath, string arguments, bool requiresElevation, bool wait, string? outFile, TimeSpan? timeout, bool hidden)
     {
         try
         {
@@ -54,9 +54,9 @@ public static class InteractiveProcess
                     FileName = fullPath,
                     Arguments = arguments ?? string.Empty,
                     WorkingDirectory = Path.GetDirectoryName(fullPath) ?? Environment.SystemDirectory,
-                    UseShellExecute = !wait,
-                    WindowStyle = ProcessWindowStyle.Hidden,
-                    CreateNoWindow = true
+                    UseShellExecute = !wait && !hidden,
+                    WindowStyle = hidden ? ProcessWindowStyle.Hidden : ProcessWindowStyle.Normal,
+                    CreateNoWindow = hidden || wait
                 };
                 if (requiresElevation) start.Verb = "runas";
                 if (wait)
@@ -81,13 +81,13 @@ public static class InteractiveProcess
                 var escapedPath = fullPath.Replace("'", "''");
                 var escapedArgs = (arguments ?? string.Empty).Replace("'", "''");
                 var ps = string.IsNullOrWhiteSpace(arguments)
-                    ? $"Start-Process -FilePath '{escapedPath}' -Verb RunAs"
-                    : $"Start-Process -FilePath '{escapedPath}' -ArgumentList '{escapedArgs}' -Verb RunAs";
+                    ? $"Start-Process -FilePath '{escapedPath}' -Verb RunAs -WindowStyle Hidden"
+                    : $"Start-Process -FilePath '{escapedPath}' -ArgumentList '{escapedArgs}' -Verb RunAs -WindowStyle Hidden";
                 return LaunchInActiveSession(name, Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe"),
-                    $"-NoProfile -WindowStyle Hidden -Command \"{ps}\"", elevated: true, wait: false, outFile: null, timeout: null);
+                    $"-NoProfile -WindowStyle Hidden -Command \"{ps}\"", elevated: true, wait: false, outFile: null, timeout: null, hidden: true);
             }
 
-            return LaunchInActiveSession(name, fullPath, arguments ?? string.Empty, elevated: false, wait, outFile, timeout);
+            return LaunchInActiveSession(name, fullPath, arguments ?? string.Empty, elevated: false, wait, outFile, timeout, hidden);
         }
         catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 1223)
         {
@@ -102,7 +102,7 @@ public static class InteractiveProcess
     private static CommandResult Success(string name, bool elevated) =>
         new(true, null, elevated ? $"{name} launched (administrator approval may be required)." : $"{name} completed.");
 
-    private static CommandResult LaunchInActiveSession(string name, string fullPath, string arguments, bool elevated, bool wait, string? outFile, TimeSpan? timeout)
+    private static CommandResult LaunchInActiveSession(string name, string fullPath, string arguments, bool elevated, bool wait, string? outFile, TimeSpan? timeout, bool hidden)
     {
         var sessionId = WTSGetActiveConsoleSessionId();
         if (sessionId == 0xFFFFFFFF) return new(false, "no_session", "No interactive Windows session is available. Sign in on the PC first.");
@@ -125,12 +125,17 @@ public static class InteractiveProcess
             var startup = new StartupInfo
             {
                 Cb = Marshal.SizeOf<StartupInfo>(),
-                LpDesktop = "winsta0\\default"
+                LpDesktop = "winsta0\\default",
+                DwFlags = hidden ? StartfUseShowWindow : 0,
+                WShowWindow = hidden ? SwHide : SwShow
             };
             const uint createUnicodeEnvironment = 0x00000400;
+            const uint createNoWindow = 0x08000000;
             const uint createNewConsole = 0x00000010;
+            // Hidden helpers must not allocate a console (that was flashing a terminal every audio poll).
+            var flags = createUnicodeEnvironment | (hidden ? createNoWindow : createNewConsole);
             if (!CreateProcessAsUser(primary, null, commandLine, IntPtr.Zero, IntPtr.Zero, false,
-                    createUnicodeEnvironment | createNewConsole, env,
+                    flags, env,
                     Path.GetDirectoryName(fullPath), ref startup, out var processInfo))
                 return new(false, "start_failed", $"Windows could not start {name} in the user session.");
 
@@ -171,6 +176,9 @@ public static class InteractiveProcess
 
     private const int SecurityImpersonation = 2;
     private const int TokenPrimary = 1;
+    private const int StartfUseShowWindow = 0x00000001;
+    private const short SwHide = 0;
+    private const short SwShow = 5;
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     private struct StartupInfo

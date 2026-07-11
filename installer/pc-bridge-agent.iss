@@ -1,5 +1,5 @@
 #define MyAppName "PC Bridge Agent"
-#define MyAppVersion "0.1.6"
+#define MyAppVersion "0.1.7"
 #define MyAppPublisher "PC Bridge Agent Contributors"
 #define PublishRoot "..\artifacts\publish"
 
