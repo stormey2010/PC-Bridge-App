@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>PcBridge.Agent</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\PcBridge.Agent.Core\PcBridge.Agent.Core.csproj" />
+    <ProjectReference Include="..\PcBridge.Agent.Windows\PcBridge.Agent.Windows.csproj" />
+  </ItemGroup>
+</Project>

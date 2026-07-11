@@ -1,0 +1,18 @@
+<Window x:Class="PcBridge.Agent.App.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="PC Bridge Agent" Width="1180" Height="760" MinWidth="940" MinHeight="640" WindowStartupLocation="CenterScreen" Background="#101017" Foreground="#F5F4FA" FontFamily="Segoe UI Variable Text, Segoe UI">
+  <Grid>
+    <Grid.ColumnDefinitions><ColumnDefinition Width="224"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+    <Border Background="#15151D" BorderBrush="#292934" BorderThickness="0,0,1,0">
+      <Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+        <StackPanel Margin="20,22,14,18"><StackPanel Orientation="Horizontal"><Border Width="36" Height="36" CornerRadius="10" Background="{StaticResource AccentBrush}"><TextBlock Text="⌁" FontSize="24" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><StackPanel Margin="11,0,0,0"><TextBlock Text="PC Bridge" FontWeight="SemiBold" FontSize="16"/><TextBlock Text="AGENT" Foreground="{StaticResource MutedBrush}" FontSize="10" FontWeight="Bold"/></StackPanel></StackPanel></StackPanel>
+        <StackPanel Grid.Row="1" x:Name="Navigation">
+          <Button Style="{StaticResource NavButton}" Tag="selected" Click="Navigate_Click" Content="⌂   Overview"/><Button Style="{StaticResource NavButton}" Click="Navigate_Click" Content="⌁   Home Assistant"/><Button Style="{StaticResource NavButton}" Click="Navigate_Click" Content="◫   Sensors"/><Button Style="{StaticResource NavButton}" Click="Navigate_Click" Content="⌁   Controls"/><Button Style="{StaticResource NavButton}" Click="Navigate_Click" Content="▦   Applications"/><Button Style="{StaticResource NavButton}" Click="Navigate_Click" Content="›_  Commands"/><Button Style="{StaticResource NavButton}" Click="Navigate_Click" Content="◇   Automations"/><Button Style="{StaticResource NavButton}" Click="Navigate_Click" Content="≡   Logs"/><Button Style="{StaticResource NavButton}" Click="Navigate_Click" Content="⚙   Settings"/>
+        </StackPanel>
+        <Border Grid.Row="2" Margin="14" Padding="12" CornerRadius="10" Background="#1E1E28"><StackPanel><StackPanel Orientation="Horizontal"><Ellipse Width="8" Height="8" Fill="#F0A53A" Margin="0,0,8,0"/><TextBlock Text="Service configured" FontSize="12"/></StackPanel><TextBlock Text="Agent 0.1.0  •  Protocol 1" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,7,0,0"/></StackPanel></Border>
+      </Grid>
+    </Border>
+    <Grid Grid.Column="1"><Grid.RowDefinitions><RowDefinition Height="76"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+      <Border BorderBrush="#292934" BorderThickness="0,0,0,1" Padding="28,0"><Grid><TextBlock x:Name="PageTitle" Text="Overview" FontSize="21" FontWeight="SemiBold" VerticalAlignment="Center"/><StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center"><Border Background="#24243A" CornerRadius="14" Padding="10,5"><StackPanel Orientation="Horizontal"><Ellipse Width="7" Height="7" Fill="#44D19D" Margin="0,0,7,0"/><TextBlock Text="Agent running" FontSize="12"/></StackPanel></Border><Button Style="{StaticResource SecondaryButton}" Content="Open logs" Padding="13,7" Margin="10,0,0,0" Click="OpenLogs_Click"/></StackPanel></Grid></Border>
+      <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto"><ContentControl x:Name="PageContent" Margin="28,24,14,24"/></ScrollViewer>
+    </Grid>
+  </Grid>
+</Window>

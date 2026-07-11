@@ -1,0 +1,17 @@
+name: Validate Windows app
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+      - run: dotnet restore PcBridge.sln
+      - run: dotnet build PcBridge.sln -c Release --no-restore
+      - run: dotnet test PcBridge.sln -c Release --no-build

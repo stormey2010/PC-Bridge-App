@@ -1,0 +1,43 @@
+
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PcBridge.Agent.Core", "windows-agent\src\PcBridge.Agent.Core\PcBridge.Agent.Core.csproj", "{8A6B2D59-95C8-4D5E-AF89-4A93706D4761}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PcBridge.Agent.Windows", "windows-agent\src\PcBridge.Agent.Windows\PcBridge.Agent.Windows.csproj", "{0C3F5CD0-EE63-4C3A-B2CB-EE8C5E581819}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PcBridge.Agent.Service", "windows-agent\src\PcBridge.Agent.Service\PcBridge.Agent.Service.csproj", "{19559DA7-EE95-4A07-B211-F439A0B21B29}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PcBridge.Agent.App", "windows-agent\src\PcBridge.Agent.App\PcBridge.Agent.App.csproj", "{D6EAC2DC-6C62-493D-9170-07AC8741DA58}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PcBridge.Agent.Tests", "windows-agent\tests\PcBridge.Agent.Tests\PcBridge.Agent.Tests.csproj", "{74B56340-74BB-456E-B46C-F91A1FE3901C}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{8A6B2D59-95C8-4D5E-AF89-4A93706D4761}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8A6B2D59-95C8-4D5E-AF89-4A93706D4761}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8A6B2D59-95C8-4D5E-AF89-4A93706D4761}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8A6B2D59-95C8-4D5E-AF89-4A93706D4761}.Release|Any CPU.Build.0 = Release|Any CPU
+		{0C3F5CD0-EE63-4C3A-B2CB-EE8C5E581819}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{0C3F5CD0-EE63-4C3A-B2CB-EE8C5E581819}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{0C3F5CD0-EE63-4C3A-B2CB-EE8C5E581819}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{0C3F5CD0-EE63-4C3A-B2CB-EE8C5E581819}.Release|Any CPU.Build.0 = Release|Any CPU
+		{19559DA7-EE95-4A07-B211-F439A0B21B29}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{19559DA7-EE95-4A07-B211-F439A0B21B29}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{19559DA7-EE95-4A07-B211-F439A0B21B29}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{19559DA7-EE95-4A07-B211-F439A0B21B29}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D6EAC2DC-6C62-493D-9170-07AC8741DA58}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D6EAC2DC-6C62-493D-9170-07AC8741DA58}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D6EAC2DC-6C62-493D-9170-07AC8741DA58}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D6EAC2DC-6C62-493D-9170-07AC8741DA58}.Release|Any CPU.Build.0 = Release|Any CPU
+		{74B56340-74BB-456E-B46C-F91A1FE3901C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{74B56340-74BB-456E-B46C-F91A1FE3901C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{74B56340-74BB-456E-B46C-F91A1FE3901C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{74B56340-74BB-456E-B46C-F91A1FE3901C}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal

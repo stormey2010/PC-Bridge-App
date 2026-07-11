@@ -1,0 +1,11 @@
+**/bin/
+**/obj/
+artifacts/
+.pytest_cache/
+__pycache__/
+*.pyc
+.coverage
+.idea/
+.vs/
+*.user
+*.suo
