@@ -9,7 +9,7 @@ The agent makes an **outbound encrypted connection** to Home Assistant. It does 
 ## Download the Windows app
 
 1. Open the [latest PC Bridge Agent release](https://github.com/stormey2010/PC-Bridge-App/releases/latest).
-2. Under **Assets**, download `PC-Bridge-Agent-0.1.3-x64-setup.exe` or the newest `-setup.exe` available.
+2. Under **Assets**, download `PC-Bridge-Agent-0.1.4-x64-setup.exe` or the newest `-setup.exe` available.
 3. Run the installer.
 4. Leave **Install the background Windows service** selected so PC Bridge starts when Windows boots.
 5. Leave **Open PC Bridge Agent after installation** selected.
@@ -59,15 +59,19 @@ If it does not connect, restart the **PC Bridge Agent** service from Windows Ser
 - Network upload/download rate and local IP
 - Volume sensor/control, mute switch, and default audio output
 - Real Windows Power Request-based keep awake
-- Lock and sleep controls
+- Lock, sleep, hibernate, and log-off controls
 - Restart and shutdown controls, disabled locally by default
+- Allowlisted application launch buttons for Home Assistant
+- Allowlisted custom commands with optional admin (UAC) elevation — off by default
+- Fast vs slow sensor intervals plus change-filtered pushes (less chatter)
+- Storage free-space sensors on the slow interval
 - Automatic reconnection after Home Assistant outages, network changes, and wake
 - Exponential backoff without log or network spam
 - Stable installation UUIDs that survive PC renames and IP changes
 - Fluent dark Windows configuration UI
 - Rotating local logs
 
-Hardware temperatures, GPU details, media controls, app allowlists, the full tray experience, temporary pairing codes, and advanced commands are later phases. Unsupported values are not faked.
+Hardware temperatures, GPU details, media controls, the full tray experience, and temporary pairing codes are later phases. Unsupported values are not faked. There is no open remote shell — Home Assistant can only run paths you allowlisted on the PC.
 
 ## Running in the background
 
@@ -75,13 +79,15 @@ The installer creates the **PC Bridge Agent** Windows service and configures it 
 
 ## Changing settings later
 
-Open PC Bridge Agent from the Start menu. The pages are functional in version 0.1.3 and newer:
+Open PC Bridge Agent from the Start menu. The pages are functional in version 0.1.4 and newer:
 
 - **Home Assistant:** edit/test the URL, replace or remove the token, and restart the agent.
-- **Sensors:** enable or disable system, audio, network, and keep-awake groups.
-- **Controls:** locally allow or deny each remote control, including restart and shutdown.
+- **Sensors:** enable or disable system, audio, network, keep-awake, and storage groups.
+- **Controls:** locally allow or deny each remote control, including hibernate, apps, and custom commands.
+- **Applications:** allowlist executables Home Assistant may launch.
+- **Commands:** allowlist fixed custom commands, optionally with admin elevation.
 - **Logs:** open the log directory or export redacted diagnostics.
-- **Settings:** control service startup and the privacy-sensitive sensor master permission.
+- **Settings:** service startup, privacy sensors, and fast/slow update intervals.
 
 When a service restart is required, the app asks before showing the normal Windows administrator prompt.
 

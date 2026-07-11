@@ -72,9 +72,9 @@ public sealed class KeepAwakeProvider(KeepAwakeController controller, TimeSpan i
     public string Name => "Keep awake"; public TimeSpan Interval => interval;
     public IReadOnlyList<EntityDescriptor> Describe() =>
     [
-        new("keep_awake", "switch", "Keep awake"),
-        new("keep_awake_reason", "sensor", "Keep awake reason"),
-        new("keep_awake_remaining", "sensor", "Keep awake remaining", "duration", "s")
+        new("keep_awake", "switch", "Keep awake", Command: "keep_awake.set"),
+        new("keep_awake_reason", "sensor", "Keep awake reason", EntityCategory: "diagnostic"),
+        new("keep_awake_remaining", "sensor", "Keep awake remaining", "duration", "s", EntityCategory: "diagnostic")
     ];
     public Task<IReadOnlyList<EntityState>> ReadAsync(CancellationToken cancellationToken)
     {
@@ -86,23 +86,42 @@ public sealed class KeepAwakeProvider(KeepAwakeController controller, TimeSpan i
 
 public sealed class PowerCommandHandler : ICommandHandler
 {
-    public IReadOnlySet<string> Commands { get; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "system.lock", "system.sleep", "system.restart", "system.shutdown" };
+    public IReadOnlySet<string> Commands { get; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "system.lock", "system.sleep", "system.hibernate", "system.logoff", "system.restart", "system.shutdown"
+    };
+
     public async Task<CommandResult> ExecuteAsync(string command, IReadOnlyDictionary<string, System.Text.Json.JsonElement>? parameters, CancellationToken cancellationToken)
     {
         if (command == "system.lock")
             return LockWorkStation() ? new(true, null, "PC locked successfully.") : new(false, "windows_error", "Windows rejected the lock request.");
         if (command == "system.sleep")
-            return SetSuspendState(false, false, false) ? new(true, null, "Sleep request accepted.") : new(false, "windows_error", "Windows rejected the sleep request.");
-        var arguments = command == "system.restart" ? "/r /t 0" : "/s /t 0";
+            return SetSuspendState(false, true, true) ? new(true, null, "Sleep request accepted.") : new(false, "windows_error", "Windows rejected the sleep request.");
+        if (command == "system.hibernate")
+            return SetSuspendState(true, true, true) ? new(true, null, "Hibernate request accepted.") : new(false, "windows_error", "Windows rejected the hibernate request.");
+        if (command == "system.logoff")
+            return ExitWindowsEx(0, 0) ? new(true, null, "Log off request accepted.") : new(false, "windows_error", "Windows rejected the log off request.");
+
+        var arguments = command switch
+        {
+            "system.restart" => "/r /t 0",
+            "system.shutdown" => "/s /t 0",
+            _ => null
+        };
+        if (arguments is null) return new(false, "unknown_command", "Unsupported power command.");
         try
         {
             using var process = Process.Start(new ProcessStartInfo("shutdown.exe", arguments) { UseShellExecute = false, CreateNoWindow = true });
             if (process is null) return new(false, "start_failed", "Windows could not start the shutdown request.");
             await process.WaitForExitAsync(cancellationToken);
-            return process.ExitCode == 0 ? new(true, null, command == "system.restart" ? "Restart accepted by Windows." : "Shutdown accepted by Windows.") : new(false, "windows_error", $"Windows rejected the request with code {process.ExitCode}.");
+            return process.ExitCode == 0
+                ? new(true, null, command == "system.restart" ? "Restart accepted by Windows." : "Shutdown accepted by Windows.")
+                : new(false, "windows_error", $"Windows rejected the request with code {process.ExitCode}.");
         }
         catch (Exception ex) when (ex is not OperationCanceledException) { return new(false, "windows_error", "Windows could not accept the power request."); }
     }
+
     [DllImport("user32.dll")] private static extern bool LockWorkStation();
+    [DllImport("user32.dll")] private static extern bool ExitWindowsEx(uint flags, uint reason);
     [DllImport("PowrProf.dll", SetLastError = true)] private static extern bool SetSuspendState(bool hibernate, bool forceCritical, bool disableWakeEvent);
 }

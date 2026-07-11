@@ -25,6 +25,8 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _statusTimer;
     private CheckBox? _privacyCheck;
     private CheckBox? _startupCheck;
+    private TextBox? _fastIntervalBox;
+    private TextBox? _staticIntervalBox;
     private readonly string _dataDirectory = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "PC Bridge Agent");
 
     public MainWindow(AgentSettings settings, SettingsStore settingsStore, ICredentialStore credentials, bool demo = false)
@@ -87,16 +89,16 @@ public partial class MainWindow : Window
             identity.Children.Add(Body(snapshot.FriendlyError));
         heroGrid.Children.Add(identity);
         var actions = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
-        foreach (var action in new[] { "Lock", "Sleep", "Restart", "Shut down" }) actions.Children.Add(ActionButton(action));
+        foreach (var action in new[] { "Lock", "Sleep", "Hibernate", "Log off", "Restart", "Shut down" }) actions.Children.Add(ActionButton(action));
         Grid.SetColumn(actions, 1);
         heroGrid.Children.Add(actions);
         hero.Child = heroGrid;
         root.Children.Add(hero);
         var metrics = new UniformGrid { Columns = 4 };
-        metrics.Children.Add(Metric("CPU", _demo ? "18%" : "Live in HA", "Updates every 5 sec", "#7568FF"));
-        metrics.Children.Add(Metric("Memory", _demo ? "42%" : "Live in HA", "Event stream", "#41C7A5"));
+        metrics.Children.Add(Metric("CPU", _demo ? "18%" : "Live in HA", $"Fast · {_settings.FastUpdateSeconds}s", "#7568FF"));
+        metrics.Children.Add(Metric("Memory", _demo ? "42%" : "Live in HA", "Change-filtered", "#41C7A5"));
         metrics.Children.Add(Metric("Volume", _demo ? "35%" : "Live in HA", "Default output", "#49A8FF"));
-        metrics.Children.Add(Metric("Keep awake", "Configurable", "Controls page", "#F0A53A"));
+        metrics.Children.Add(Metric("Keep awake", "Slow poll", $"{_settings.StaticUpdateSeconds}s · on change", "#F0A53A"));
         root.Children.Add(metrics);
         var lower = new Grid();
         lower.ColumnDefinitions.Add(new() { Width = new(2, GridUnitType.Star) });
@@ -149,9 +151,10 @@ public partial class MainWindow : Window
         var system = SensorToggle("system", "System", "CPU, memory, uptime, idle time, lock and power state");
         var audio = SensorToggle("audio", "Audio", "Volume, mute and default output device");
         var network = SensorToggle("network", "Network", "Local IP plus upload and download rate");
-        var keepAwake = SensorToggle("keep_awake", "Keep awake", "Keep-awake state, reason and remaining time");
-        return Page("Sensor settings", "Choose which sensor groups the background agent registers. Changes apply automatically within a few seconds.",
-            system, audio, network, keepAwake,
+        var keepAwake = SensorToggle("keep_awake", "Keep awake", "Keep-awake state — sampled on the slow interval");
+        var storage = SensorToggle("storage", "Storage", "System drive free space — sampled on the slow interval");
+        return Page("Sensor settings", "Fast sensors update often. Slow sensors (keep awake, storage) update less often and only push when values change.",
+            system, audio, network, keepAwake, storage,
             Section("Hardware monitoring", "CPU/GPU temperature and fan speed", "Unavailable — no supported provider detected"),
             ActionBar(("Save sensor settings", SaveSensors_Click, true)));
     }
@@ -163,22 +166,86 @@ public partial class MainWindow : Window
         {
             ControlToggle("system.lock", "Lock", "Lock the current Windows session"),
             ControlToggle("system.sleep", "Sleep", "Put the PC into sleep mode"),
-            ControlToggle("system.restart", "Restart", "Destructive — confirmation is shown locally"),
-            ControlToggle("system.shutdown", "Shut down", "Destructive — confirmation is shown locally"),
+            ControlToggle("system.hibernate", "Hibernate", "Hibernate the PC — disabled by default"),
+            ControlToggle("system.logoff", "Log off", "Sign out the current user — disabled by default"),
+            ControlToggle("system.restart", "Restart", "Destructive — disabled by default"),
+            ControlToggle("system.shutdown", "Shut down", "Destructive — disabled by default"),
             ControlToggle("audio.set_volume", "Volume control", "Allow Home Assistant to set volume"),
             ControlToggle("audio.set_mute", "Mute control", "Allow Home Assistant to mute or unmute"),
-            ControlToggle("keep_awake.set", "Keep awake", "Allow Home Assistant to manage keep-awake")
+            ControlToggle("keep_awake.set", "Keep awake", "Allow Home Assistant to manage keep-awake"),
+            ControlToggle("app.launch", "Launch applications", "Allow Home Assistant to launch allowlisted apps"),
+            ControlToggle("custom.run", "Custom commands", "Allow Home Assistant to run allowlisted custom commands — disabled by default")
         };
-        return Page("Approved controls", "Disabled controls are rejected by the Windows agent even if Home Assistant sends them manually.",
+        return Page("Approved controls", "Disabled controls are rejected by the Windows agent even if Home Assistant sends them.",
             controls.Append(ActionBar(("Save control settings", SaveControls_Click, true))).ToArray());
     }
 
-    private FrameworkElement BuildApplications() => Page("Application allowlist", "Application controls are not implemented in this release.",
-        Empty("No buttons are shown because the Phase 1 agent cannot safely manage applications yet.", "Coming in Phase 2"));
+    private FrameworkElement BuildApplications()
+    {
+        var list = Stack();
+        if (_settings.AllowedApplications.Count == 0)
+            list.Children.Add(Empty("Add apps you want Home Assistant to launch. Only these exact executables can be started — HA cannot pick a different path.", "No applications yet"));
+        foreach (var app in _settings.AllowedApplications.ToList())
+        {
+            var row = Card();
+            var content = Stack();
+            content.Children.Add(Label(string.IsNullOrWhiteSpace(app.Name) ? "Unnamed app" : app.Name, 15));
+            content.Children.Add(Body($"{app.ExecutablePath}\n{(string.IsNullOrWhiteSpace(app.Arguments) ? "No arguments" : "Args: " + app.Arguments)}\n{(app.Enabled ? "Enabled" : "Disabled")}"));
+            var buttons = new StackPanel { Orientation = Orientation.Horizontal, Margin = new(0, 10, 0, 0) };
+            var toggle = MakeButton(app.Enabled ? "Disable" : "Enable", false);
+            toggle.Click += async (_, _) => { app.Enabled = !app.Enabled; await _settingsStore.SaveAsync(_settings); PageContent.Content = BuildApplications(); };
+            var remove = MakeButton("Remove", false);
+            remove.Click += async (_, _) =>
+            {
+                if (MessageBox.Show($"Remove {app.Name} from the allowlist?", "Remove application", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+                _settings.AllowedApplications.Remove(app);
+                await _settingsStore.SaveAsync(_settings);
+                PageContent.Content = BuildApplications();
+            };
+            buttons.Children.Add(toggle);
+            buttons.Children.Add(remove);
+            content.Children.Add(buttons);
+            row.Child = content;
+            list.Children.Add(row);
+        }
+        return Page("Application allowlist", "Each enabled app becomes a Home Assistant button. Paths are chosen on this PC only.",
+            list,
+            ActionBar(("Add application", AddApplication_Click, true), ("Save & reconnect", SaveAppsCommands_Click, false)));
+    }
 
-    private FrameworkElement BuildCommands() => Page("Commands", "Arbitrary remote commands are not implemented in this release.",
-        Badge("SHIELDED  No remote shell exposed", "#1E4A3E", "#73E2B9"),
-        Empty("PC Bridge currently accepts only the fixed controls shown on the Controls page.", "Safe Phase 1 mode"));
+    private FrameworkElement BuildCommands()
+    {
+        var list = Stack();
+        list.Children.Add(Badge("ALLOWLIST ONLY  No remote shell — HA can only run commands you add here", "#1E4A3E", "#73E2B9"));
+        if (_settings.CustomCommands.Count == 0)
+            list.Children.Add(Empty("Add fixed executables (optionally with admin elevation). Home Assistant only sends the command id — never a free-form path.", "No custom commands yet"));
+        foreach (var command in _settings.CustomCommands.ToList())
+        {
+            var row = Card();
+            var content = Stack();
+            content.Children.Add(Label(string.IsNullOrWhiteSpace(command.Name) ? "Unnamed command" : command.Name, 15));
+            content.Children.Add(Body($"{command.ExecutablePath}\n{(string.IsNullOrWhiteSpace(command.Arguments) ? "No arguments" : "Args: " + command.Arguments)}\n{(command.RequiresElevation ? "Runs elevated (UAC)" : "Normal privileges")} • {(command.Enabled ? "Enabled" : "Disabled")}"));
+            var buttons = new StackPanel { Orientation = Orientation.Horizontal, Margin = new(0, 10, 0, 0) };
+            var toggle = MakeButton(command.Enabled ? "Disable" : "Enable", false);
+            toggle.Click += async (_, _) => { command.Enabled = !command.Enabled; await _settingsStore.SaveAsync(_settings); PageContent.Content = BuildCommands(); };
+            var remove = MakeButton("Remove", false);
+            remove.Click += async (_, _) =>
+            {
+                if (MessageBox.Show($"Remove {command.Name}?", "Remove command", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+                _settings.CustomCommands.Remove(command);
+                await _settingsStore.SaveAsync(_settings);
+                PageContent.Content = BuildCommands();
+            };
+            buttons.Children.Add(toggle);
+            buttons.Children.Add(remove);
+            content.Children.Add(buttons);
+            row.Child = content;
+            list.Children.Add(row);
+        }
+        return Page("Custom commands", "Enable Custom commands on the Controls page before Home Assistant can run these. Elevation prompts UAC on this PC.",
+            list,
+            ActionBar(("Add custom command", AddCustomCommand_Click, true), ("Save & reconnect", SaveAppsCommands_Click, false)));
+    }
 
     private FrameworkElement BuildLogs() => Page("Logs & diagnostics", "Open local rotating logs or export a redacted configuration snapshot.",
         Row("Log level", "Information"),
@@ -189,16 +256,101 @@ public partial class MainWindow : Window
     {
         _startupCheck = Toggle("Start the Windows service automatically", "Configure the installed PC Bridge Agent service to start at boot", _settings.StartAutomatically);
         _privacyCheck = Toggle("Privacy-sensitive sensors", "Master permission for future activity, user, microphone and camera providers", _settings.PrivacySensorsEnabled);
+        _fastIntervalBox = new TextBox { Text = _settings.FastUpdateSeconds.ToString(), Margin = new(0, 0, 0, 8), Padding = new(8, 6, 8, 6) };
+        _staticIntervalBox = new TextBox { Text = _settings.StaticUpdateSeconds.ToString(), Margin = new(0, 0, 0, 8), Padding = new(8, 6, 8, 6) };
+        var intervals = Card();
+        var intervalStack = Stack();
+        intervalStack.Children.Add(Label("Update intervals", 16));
+        intervalStack.Children.Add(Body("Fast sensors (CPU, memory, audio, network): seconds between samples. Only changed values are pushed."));
+        intervalStack.Children.Add(_fastIntervalBox);
+        intervalStack.Children.Add(Body("Slow sensors (keep awake, storage): seconds between samples."));
+        intervalStack.Children.Add(_staticIntervalBox);
+        intervals.Child = intervalStack;
         return Page("Settings", "These settings are saved locally on this PC.",
             _startupCheck,
             _privacyCheck,
-            Section("Appearance", "Dark Fluent theme  •  Violet accent  •  Comfortable density", "Active"),
+            intervals,
             ActionBar(("Save settings", SaveGeneralSettings_Click, true), ("Open Windows Services", OpenServices_Click, false)));
     }
 
     private FrameworkElement BuildComingSoon(string title) => Page(title, "This feature is not implemented in the current release.",
         Empty("The page is intentionally read-only so it does not imply an action succeeded.", "Coming later"));
 
+    private async void AddApplication_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFileDialog { Filter = "Programs|*.exe;*.bat;*.cmd;*.lnk|All files|*.*", Title = "Choose application" };
+        if (dialog.ShowDialog(this) != true) return;
+        var name = PromptText("Display name for Home Assistant:", System.IO.Path.GetFileNameWithoutExtension(dialog.FileName));
+        if (string.IsNullOrWhiteSpace(name)) return;
+        var args = PromptText("Optional arguments:", "") ?? string.Empty;
+        _settings.AllowedApplications.Add(new AllowedApplication
+        {
+            Name = name.Trim(),
+            ExecutablePath = dialog.FileName,
+            Arguments = args.Trim(),
+            Enabled = true
+        });
+        await _settingsStore.SaveAsync(_settings);
+        PageContent.Content = BuildApplications();
+    }
+
+    private async void AddCustomCommand_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFileDialog { Filter = "Programs|*.exe;*.bat;*.cmd;*.ps1|All files|*.*", Title = "Choose command executable" };
+        if (dialog.ShowDialog(this) != true) return;
+        var name = PromptText("Display name for Home Assistant:", System.IO.Path.GetFileNameWithoutExtension(dialog.FileName));
+        if (string.IsNullOrWhiteSpace(name)) return;
+        var args = PromptText("Fixed arguments (Home Assistant cannot change these):", "") ?? string.Empty;
+        var elevate = MessageBox.Show("Should this command request administrator privileges (UAC) when run?", "Elevation", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes;
+        _settings.CustomCommands.Add(new CustomCommand
+        {
+            Name = name.Trim(),
+            ExecutablePath = dialog.FileName,
+            Arguments = args.Trim(),
+            RequiresElevation = elevate,
+            Enabled = true
+        });
+        if (!_settings.EnabledControls.GetValueOrDefault("custom.run"))
+            MessageBox.Show("Custom commands are still disabled on the Controls page. Enable “Custom commands” there before Home Assistant can run them.", "Enable control", MessageBoxButton.OK, MessageBoxImage.Information);
+        await _settingsStore.SaveAsync(_settings);
+        PageContent.Content = BuildCommands();
+    }
+
+    private string? PromptText(string label, string initial)
+    {
+        var window = new Window
+        {
+            Title = "PC Bridge Agent",
+            Width = 420,
+            Height = 180,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Owner = this,
+            ResizeMode = ResizeMode.NoResize,
+            Background = new SolidColorBrush(Color.FromRgb(16, 16, 23))
+        };
+        var box = new TextBox { Text = initial, Margin = new(0, 8, 0, 12), Padding = new(8, 6, 8, 6) };
+        string? result = null;
+        var ok = MakeButton("Save", true);
+        ok.Click += (_, _) => { result = box.Text; window.DialogResult = true; };
+        var cancel = MakeButton("Cancel", false);
+        cancel.Click += (_, _) => window.DialogResult = false;
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal };
+        buttons.Children.Add(ok);
+        buttons.Children.Add(cancel);
+        var stack = Stack();
+        stack.Margin = new(16);
+        stack.Children.Add(Label(label, 13, "#A5A3B5"));
+        stack.Children.Add(box);
+        stack.Children.Add(buttons);
+        window.Content = stack;
+        return window.ShowDialog() == true ? result : null;
+    }
+
+    private async void SaveAppsCommands_Click(object sender, RoutedEventArgs e)
+    {
+        await _settingsStore.SaveAsync(_settings);
+        MessageBox.Show("Saved. The agent will reconnect and register the updated buttons in Home Assistant.", "Saved", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
     private CheckBox SensorToggle(string key, string title, string description)
     {
         var check = Toggle(title, description, _settings.EnabledSensorGroups.GetValueOrDefault(key, true));
@@ -295,6 +447,8 @@ public partial class MainWindow : Window
         var autoStartChanged = _settings.StartAutomatically != (_startupCheck?.IsChecked == true);
         _settings.StartAutomatically = _startupCheck?.IsChecked == true;
         _settings.PrivacySensorsEnabled = _privacyCheck?.IsChecked == true;
+        if (int.TryParse(_fastIntervalBox?.Text, out var fast)) _settings.FastUpdateSeconds = fast;
+        if (int.TryParse(_staticIntervalBox?.Text, out var slow)) _settings.StaticUpdateSeconds = slow;
         await _settingsStore.SaveAsync(_settings);
         if (autoStartChanged && !_demo)
         {
@@ -305,7 +459,7 @@ public partial class MainWindow : Window
             }
             catch (Exception ex) { MessageBox.Show($"Settings were saved, but Windows service startup could not be changed: {ex.Message}", "Startup setting", MessageBoxButton.OK, MessageBoxImage.Warning); return; }
         }
-        MessageBox.Show("Settings saved.", "PC Bridge Agent", MessageBoxButton.OK, MessageBoxImage.Information);
+        MessageBox.Show("Settings saved. Interval changes apply when the agent reconnects.", "PC Bridge Agent", MessageBoxButton.OK, MessageBoxImage.Information);
     }
 
     private async Task SaveAndOfferRestartAsync(string message)
@@ -559,9 +713,17 @@ if ($svc.Status -ne 'Running') { throw "Service status is $($svc.Status)" }
     private async void QuickAction_Click(object sender, RoutedEventArgs e)
     {
         var action = (string)((Button)sender).Tag;
-        var command = action switch { "Lock" => "system.lock", "Sleep" => "system.sleep", "Restart" => "system.restart", _ => "system.shutdown" };
+        var command = action switch
+        {
+            "Lock" => "system.lock",
+            "Sleep" => "system.sleep",
+            "Hibernate" => "system.hibernate",
+            "Log off" => "system.logoff",
+            "Restart" => "system.restart",
+            _ => "system.shutdown"
+        };
         if (!_settings.EnabledControls.GetValueOrDefault(command)) { MessageBox.Show($"{action} is disabled on the Controls page.", "Control disabled", MessageBoxButton.OK, MessageBoxImage.Information); return; }
-        if (action is "Restart" or "Shut down" && MessageBox.Show($"Are you sure you want to {action.ToLowerInvariant()} this PC?", "Confirm action", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
+        if (action is "Restart" or "Shut down" or "Hibernate" or "Log off" && MessageBox.Show($"Are you sure you want to {action.ToLowerInvariant()} this PC?", "Confirm action", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
         if (_demo) { MessageBox.Show($"Demo: {action} command accepted.", "PC Bridge Agent"); return; }
         var result = await new PowerCommandHandler().ExecuteAsync(command, null, CancellationToken.None);
         if (!result.Success) MessageBox.Show(result.Message, "Command failed", MessageBoxButton.OK, MessageBoxImage.Error);

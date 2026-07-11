@@ -39,12 +39,35 @@ public sealed record EntityDescriptor(
     string? DeviceClass = null,
     string? Unit = null,
     bool EnabledByDefault = true,
-    string? EntityCategory = null);
+    string? EntityCategory = null,
+    string? Command = null,
+    IReadOnlyDictionary<string, object?>? CommandParameters = null);
 
 public sealed record EntityState(string Key, object? Value, IReadOnlyDictionary<string, object?>? Attributes = null);
 public sealed record StateBatch(IReadOnlyList<EntityState> States);
 public sealed record CommandRequest(string Command, IReadOnlyDictionary<string, JsonElement>? Parameters = null);
 public sealed record CommandResult(bool Success, string? ErrorCode, string Message, object? Data = null);
+
+/// <summary>Tracks last published values so unchanged sensor readings are not re-pushed.</summary>
+public sealed class StateChangeTracker
+{
+    private readonly Dictionary<string, string> _last = new(StringComparer.OrdinalIgnoreCase);
+
+    public IReadOnlyList<EntityState> FilterChanged(IEnumerable<EntityState> states)
+    {
+        var changed = new List<EntityState>();
+        foreach (var state in states)
+        {
+            var encoded = JsonSerializer.Serialize(state.Value, Protocol.Json);
+            if (_last.TryGetValue(state.Key, out var previous) && previous == encoded) continue;
+            _last[state.Key] = encoded;
+            changed.Add(state);
+        }
+        return changed;
+    }
+
+    public void Reset() => _last.Clear();
+}
 
 public sealed class DuplicateCommandGuard(TimeSpan retention)
 {

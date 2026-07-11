@@ -23,6 +23,8 @@ try
     builder.Services.AddSingleton<ICommandHandler>(sp => sp.GetRequiredService<KeepAwakeController>());
     builder.Services.AddSingleton<ICommandHandler, AudioCommandHandler>();
     builder.Services.AddSingleton<ICommandHandler, PowerCommandHandler>();
+    builder.Services.AddSingleton<ICommandHandler, ApplicationCommandHandler>();
+    builder.Services.AddSingleton<ICommandHandler, CustomCommandHandler>();
     builder.Services.AddSingleton<HomeAssistantConnection>();
     builder.Services.AddHostedService<AgentWorker>();
     await builder.Build().RunAsync();

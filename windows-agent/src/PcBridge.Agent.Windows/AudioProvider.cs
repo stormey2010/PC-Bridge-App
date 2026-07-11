@@ -10,8 +10,8 @@ public sealed class AudioProvider(TimeSpan interval) : ISensorProvider
     public IReadOnlyList<EntityDescriptor> Describe() =>
     [
         new("volume_level", "sensor", "Volume", null, "%"),
-        new("volume", "number", "Volume", null, "%"),
-        new("mute", "switch", "Mute"),
+        new("volume", "number", "Volume", null, "%", Command: "audio.set_volume"),
+        new("mute", "switch", "Mute", Command: "audio.set_mute"),
         new("default_output_device", "sensor", "Default output device", null, null, false, "diagnostic")
     ];
     public Task<IReadOnlyList<EntityState>> ReadAsync(CancellationToken cancellationToken)

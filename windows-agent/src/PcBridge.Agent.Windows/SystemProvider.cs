@@ -110,6 +110,36 @@ public sealed class NetworkProvider(TimeSpan interval) : ISensorProvider
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }
 
+public sealed class StorageProvider(TimeSpan interval) : ISensorProvider
+{
+    public string Name => "Storage";
+    public TimeSpan Interval => interval;
+    public IReadOnlyList<EntityDescriptor> Describe() =>
+    [
+        new("disk_free_percent", "sensor", "Disk free", null, "%"),
+        new("disk_free", "sensor", "Disk free space", "data_size", "GB"),
+        new("disk_total", "sensor", "Disk total space", "data_size", "GB", false, "diagnostic")
+    ];
+
+    public Task<IReadOnlyList<EntityState>> ReadAsync(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var system = Path.GetPathRoot(Environment.SystemDirectory) ?? "C:\\";
+        var drive = new DriveInfo(system);
+        if (!drive.IsReady) return Task.FromResult<IReadOnlyList<EntityState>>([]);
+        var total = drive.TotalSize / 1024d / 1024d / 1024d;
+        var free = drive.AvailableFreeSpace / 1024d / 1024d / 1024d;
+        var percent = total <= 0 ? 0 : Math.Round(free / total * 100, 1);
+        return Task.FromResult<IReadOnlyList<EntityState>>([
+            new("disk_free_percent", percent),
+            new("disk_free", Math.Round(free, 1)),
+            new("disk_total", Math.Round(total, 1))
+        ]);
+    }
+
+    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+}
+
 public static class DeviceInformation
 {
     public static (string Manufacturer, string Model) Read()
