@@ -1,5 +1,5 @@
 #define MyAppName "PC Bridge Agent"
-#define MyAppVersion "0.1.2"
+#define MyAppVersion "0.1.3"
 #define MyAppPublisher "PC Bridge Agent Contributors"
 #define PublishRoot "..\artifacts\publish"
 
@@ -25,7 +25,6 @@ RestartApplications=no
 SetupLogging=yes
 
 [Tasks]
-Name: "service"; Description: "Install the background Windows service"; GroupDescription: "Agent mode:"; Flags: exclusive checkedonce
 Name: "startup"; Description: "Start the desktop companion when I sign in"; GroupDescription: "Startup:"; Flags: checkedonce
 Name: "launch"; Description: "Open PC Bridge Agent after installation"; GroupDescription: "Finish:"; Flags: checkedonce
 
@@ -45,10 +44,8 @@ Name: "{autodesktop}\PC Bridge Agent"; Filename: "{app}\PcBridge.Agent.exe"; Tas
 Root: HKA; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "PC Bridge Agent"; ValueData: """{app}\PcBridge.Agent.exe"" --tray"; Flags: uninsdeletevalue; Tasks: startup
 
 [Run]
-Filename: "{sys}\sc.exe"; Parameters: "create ""PC Bridge Agent"" binPath= """"{app}\service\PcBridge.Agent.Service.exe"""" start= auto DisplayName= ""PC Bridge Agent"""; Flags: runhidden waituntilterminated; Tasks: service
-Filename: "{sys}\sc.exe"; Parameters: "description ""PC Bridge Agent"" ""Secure outbound Windows-to-Home-Assistant bridge"""; Flags: runhidden waituntilterminated; Tasks: service
-Filename: "{sys}\sc.exe"; Parameters: "failure ""PC Bridge Agent"" reset= 86400 actions= restart/5000/restart/30000/restart/60000"; Flags: runhidden waituntilterminated; Tasks: service
-Filename: "{sys}\sc.exe"; Parameters: "start ""PC Bridge Agent"""; Flags: runhidden waituntilterminated; Tasks: service
+; Always install the background service. The desktop UI cannot connect to Home Assistant by itself.
+Filename: "{sys}\cmd.exe"; Parameters: "/c sc.exe stop ""PC Bridge Agent"" >nul 2>&1 & sc.exe delete ""PC Bridge Agent"" >nul 2>&1 & sc.exe create ""PC Bridge Agent"" binPath= """"{app}\service\PcBridge.Agent.Service.exe"""" start= auto DisplayName= ""PC Bridge Agent"" && sc.exe description ""PC Bridge Agent"" ""Secure outbound Windows-to-Home-Assistant bridge"" && sc.exe failure ""PC Bridge Agent"" reset= 86400 actions= restart/5000/restart/30000/restart/60000 && sc.exe start ""PC Bridge Agent"""; Flags: runhidden waituntilterminated
 Filename: "{app}\PcBridge.Agent.exe"; Description: "Open PC Bridge Agent"; Flags: nowait postinstall skipifsilent; Tasks: launch
 
 [UninstallRun]

@@ -33,3 +33,8 @@ Windows audio endpoints belong to user sessions and can differ for LocalSystem. 
 ## Hardware sensor missing
 
 The agent never invents temperature, GPU, battery, or fan values. Phase 3 hardware providers will report only when a supported driver/provider can return reliable readings.
+
+## Background service is not installed
+
+The desktop app only saves settings. Home Assistant connection requires the **PC Bridge Agent** Windows service. If status says the service is missing, open **Home Assistant ? Install background service** and approve UAC, or reinstall and keep the service install step enabled. In 0.1.3+ the installer always installs the service.
+

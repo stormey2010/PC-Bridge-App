@@ -40,6 +40,7 @@ public partial class MainWindow : Window
         _statusTimer.Tick += (_, _) => RefreshServiceStatus();
         _statusTimer.Start();
         Closed += (_, _) => _statusTimer.Stop();
+        Loaded += async (_, _) => await EnsureServiceInstalledAsync(promptIfMissing: true);
     }
 
     private void Navigate_Click(object sender, RoutedEventArgs e)
@@ -66,6 +67,7 @@ public partial class MainWindow : Window
     private FrameworkElement BuildOverview()
     {
         var snapshot = ReadConnectionSnapshot();
+        var installed = _demo || IsServiceInstalled();
         var root = Stack();
         root.Children.Add(Heading(_settings.DeviceName, "Your Windows PC, connected without opening an inbound port."));
         var hero = Card();
@@ -75,8 +77,13 @@ public partial class MainWindow : Window
         var identity = Stack();
         identity.Children.Add(Label("HOME ASSISTANT", 11, "#A5A3B5"));
         identity.Children.Add(Label(string.IsNullOrWhiteSpace(_settings.HomeAssistantUrl) ? "Not configured" : _settings.HomeAssistantUrl, 16));
-        identity.Children.Add(Badge(StatusBadgeText(snapshot), StatusBadgeBackground(snapshot), StatusBadgeForeground(snapshot)));
-        if (!string.IsNullOrWhiteSpace(snapshot?.FriendlyError) && snapshot.Status != ConnectionStatus.Connected)
+        identity.Children.Add(Badge(
+            installed ? StatusBadgeText(snapshot) : "●  Background service not installed",
+            installed ? StatusBadgeBackground(snapshot) : "#4A1E1E",
+            installed ? StatusBadgeForeground(snapshot) : "#F0A0A0"));
+        if (!installed)
+            identity.Children.Add(Body("The desktop app only manages settings. Install the background Windows service from the Home Assistant page to connect."));
+        else if (!string.IsNullOrWhiteSpace(snapshot?.FriendlyError) && snapshot.Status != ConnectionStatus.Connected)
             identity.Children.Add(Body(snapshot.FriendlyError));
         heroGrid.Children.Add(identity);
         var actions = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
@@ -114,20 +121,26 @@ public partial class MainWindow : Window
     private FrameworkElement BuildConnection()
     {
         var snapshot = ReadConnectionSnapshot();
+        var installed = _demo || IsServiceInstalled();
         var actions = ActionBar(
             ("Edit connection", EditConnection_Click, true),
             ("Test saved connection", TestConnection_Click, false),
-            ("Restart agent", RestartAgent_Click, false),
+            installed ? ("Restart agent", RestartAgent_Click, false) : ("Install background service", InstallService_Click, false),
             ("Remove credential", RemoveCredential_Click, false));
-        return Page("Home Assistant connection", "Edit and validate the URL, credential, and PC name here.",
+        return Page("Home Assistant connection", "Edit and validate the URL, credential, and PC name here. The background Windows service is what actually connects to Home Assistant.",
             Row("Server", string.IsNullOrWhiteSpace(_settings.HomeAssistantUrl) ? "Not configured" : _settings.HomeAssistantUrl),
             Row("PC name", _settings.DeviceName),
+            Row("Background service", installed ? (IsServiceRunning() ? "Installed and running" : "Installed but stopped") : "Not installed"),
             Row("Live status", StatusLabel(snapshot)),
             Row("Last connected", snapshot?.LastConnected is null ? "Never" : snapshot.LastConnected.Value.ToLocalTime().ToString("g")),
             Row("Installation ID", _settings.InstallationId),
             Row("Protocol", "Version 1"),
             Row("Authentication", "Credential protected by Windows DPAPI"),
-            string.IsNullOrWhiteSpace(snapshot?.FriendlyError) ? actions : StackWith(Body(snapshot!.FriendlyError!), actions));
+            string.IsNullOrWhiteSpace(snapshot?.FriendlyError) && installed ? actions : StackWith(
+                Body(installed
+                    ? snapshot?.FriendlyError ?? string.Empty
+                    : "The desktop app only manages settings. Install the background Windows service to connect this PC to Home Assistant."),
+                actions));
     }
 
     private FrameworkElement BuildSensorPage()
@@ -257,7 +270,13 @@ public partial class MainWindow : Window
         MessageBox.Show("The credential was removed. Use Edit connection to pair again.", "Credential removed", MessageBoxButton.OK, MessageBoxImage.Information);
     }
 
-    private async void RestartAgent_Click(object sender, RoutedEventArgs e) => await RestartServiceElevatedAsync();
+    private async void RestartAgent_Click(object sender, RoutedEventArgs e)
+    {
+        if (!IsServiceInstalled()) await EnsureServiceInstalledAsync(promptIfMissing: false);
+        else await RestartServiceElevatedAsync();
+    }
+
+    private async void InstallService_Click(object sender, RoutedEventArgs e) => await EnsureServiceInstalledAsync(promptIfMissing: false);
 
     private async void SaveSensors_Click(object sender, RoutedEventArgs e)
     {
@@ -279,7 +298,11 @@ public partial class MainWindow : Window
         await _settingsStore.SaveAsync(_settings);
         if (autoStartChanged && !_demo)
         {
-            try { await RunElevatedAsync("sc.exe", $"config \"{ServiceName}\" start= {(_settings.StartAutomatically ? "auto" : "demand")}"); }
+            try
+            {
+                if (!IsServiceInstalled()) await InstallServiceElevatedAsync();
+                else await RunElevatedAsync("sc.exe", $"config \"{ServiceName}\" start= {(_settings.StartAutomatically ? "auto" : "demand")}");
+            }
             catch (Exception ex) { MessageBox.Show($"Settings were saved, but Windows service startup could not be changed: {ex.Message}", "Startup setting", MessageBoxButton.OK, MessageBoxImage.Warning); return; }
         }
         MessageBox.Show("Settings saved.", "PC Bridge Agent", MessageBoxButton.OK, MessageBoxImage.Information);
@@ -290,12 +313,79 @@ public partial class MainWindow : Window
         await _settingsStore.SaveAsync(_settings);
         MessageBox.Show($"{message}\n\nThe background agent will reload these settings automatically.", "Settings saved", MessageBoxButton.OK, MessageBoxImage.Information);
         RefreshServiceStatus();
-        await Task.CompletedTask;
+    }
+
+    private async Task EnsureServiceInstalledAsync(bool promptIfMissing)
+    {
+        if (_demo || IsServiceInstalled()) return;
+        if (promptIfMissing)
+        {
+            var answer = MessageBox.Show(
+                "PC Bridge's background Windows service is not installed, so this PC cannot connect to Home Assistant.\n\nInstall and start it now? Administrator approval is required.",
+                "Background service missing",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning);
+            if (answer != MessageBoxResult.Yes) return;
+        }
+        await InstallServiceElevatedAsync();
+    }
+
+    private async Task InstallServiceElevatedAsync()
+    {
+        try
+        {
+            var serviceExe = ResolveServiceExecutable();
+            if (!System.IO.File.Exists(serviceExe))
+            {
+                MessageBox.Show("Could not find PcBridge.Agent.Service.exe next to the app. Reinstall PC Bridge Agent.", "Service missing", MessageBoxButton.OK, MessageBoxImage.Error);
+                return;
+            }
+            var escaped = serviceExe.Replace("'", "''");
+            var script =
+                "$ErrorActionPreference = 'Stop'\n" +
+                "$name = 'PC Bridge Agent'\n" +
+                "$bin = '" + escaped + "'\n" +
+                "$existing = Get-Service -Name $name -ErrorAction SilentlyContinue\n" +
+                "if (-not $existing) {\n" +
+                "  New-Service -Name $name -BinaryPathName \"`\"$bin`\"\" -DisplayName $name -StartupType Automatic -Description 'Secure outbound Windows-to-Home-Assistant bridge' | Out-Null\n" +
+                "} else {\n" +
+                "  Stop-Service -Name $name -Force -ErrorAction SilentlyContinue\n" +
+                "  sc.exe config $name binPath= \"`\"$bin`\"\" start= auto | Out-Null\n" +
+                "}\n" +
+                "sc.exe failure $name reset= 86400 actions= restart/5000/restart/30000/restart/60000 | Out-Null\n" +
+                "Start-Service -Name $name -ErrorAction Stop\n" +
+                "(Get-Service $name).WaitForStatus('Running', '00:00:45')\n";
+            var encoded = Convert.ToBase64String(System.Text.Encoding.Unicode.GetBytes(script));
+            await RunElevatedAsync("powershell.exe", $"-NoProfile -ExecutionPolicy Bypass -EncodedCommand {encoded}");
+            await Task.Delay(1500);
+            RefreshServiceStatus();
+            if (PageTitle.Text == "Home Assistant") PageContent.Content = BuildConnection();
+            MessageBox.Show("The background service is installed and running. Home Assistant should show this PC within a few seconds.", "Service installed", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (Win32Exception ex) when (ex.NativeErrorCode == 1223)
+        {
+            MessageBox.Show("Administrator approval was cancelled, so the background service was not installed.", "Install cancelled", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"The background service could not be installed.\n\n{ex.Message}", "Install failed", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private static string ResolveServiceExecutable()
+    {
+        var appDir = System.IO.Path.GetDirectoryName(Environment.ProcessPath) ?? AppContext.BaseDirectory;
+        return System.IO.Path.Combine(appDir, "service", "PcBridge.Agent.Service.exe");
     }
 
     private async Task RestartServiceElevatedAsync()
     {
         if (_demo) { MessageBox.Show("Demo: agent service restarted.", "PC Bridge Agent"); return; }
+        if (!IsServiceInstalled())
+        {
+            await InstallServiceElevatedAsync();
+            return;
+        }
         try
         {
             // PowerShell waits for stop/start correctly; the old sc+timeout chain often failed mid-restart.
@@ -347,20 +437,25 @@ if ($svc.Status -ne 'Running') { throw "Service status is $($svc.Status)" }
 
     private void RefreshServiceStatus()
     {
-        var running = _demo || IsServiceRunning();
-        var snapshot = ReadConnectionSnapshot();
         if (_demo)
         {
             AgentStatusText.Text = "Demo mode";
             AgentStatusDot.Fill = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#44D19D"));
             return;
         }
-        if (!running)
+        if (!IsServiceInstalled())
+        {
+            AgentStatusText.Text = "Background service not installed";
+            AgentStatusDot.Fill = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#F06D6D"));
+            return;
+        }
+        if (!IsServiceRunning())
         {
             AgentStatusText.Text = "Agent service stopped";
             AgentStatusDot.Fill = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#F06D6D"));
             return;
         }
+        var snapshot = ReadConnectionSnapshot();
         AgentStatusText.Text = snapshot?.Status switch
         {
             ConnectionStatus.Connected => "Connected to Home Assistant",
@@ -403,6 +498,19 @@ if ($svc.Status -ne 'Running') { throw "Service status is $($svc.Status)" }
     private static string StatusBadgeBackground(ConnectionSnapshot? snapshot) => snapshot?.Status == ConnectionStatus.Connected ? "#1E4A3E" : "#4A1E1E";
     private static string StatusBadgeForeground(ConnectionSnapshot? snapshot) => snapshot?.Status == ConnectionStatus.Connected ? "#73E2B9" : "#F0A0A0";
 
+    private static bool IsServiceInstalled()
+    {
+        try
+        {
+            using var process = Process.Start(new ProcessStartInfo("sc.exe", $"query \"{ServiceName}\"") { UseShellExecute = false, RedirectStandardOutput = true, CreateNoWindow = true });
+            if (process is null) return false;
+            process.StandardOutput.ReadToEnd();
+            process.WaitForExit(3000);
+            return process.ExitCode == 0;
+        }
+        catch { return false; }
+    }
+
     private static bool IsServiceRunning()
     {
         try
@@ -428,6 +536,7 @@ if ($svc.Status -ne 'Running') { throw "Service status is $($svc.Status)" }
             installation_id = _settings.InstallationId,
             home_assistant_configured = !string.IsNullOrWhiteSpace(_settings.HomeAssistantUrl),
             service_running = IsServiceRunning(),
+            service_installed = IsServiceInstalled(),
             connection_status = snapshot?.Status.ToString(),
             last_connected = snapshot?.LastConnected,
             sensor_groups = _settings.EnabledSensorGroups,
