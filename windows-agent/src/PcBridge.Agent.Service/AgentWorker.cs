@@ -13,7 +13,6 @@ public sealed class AgentWorker(
     ICredentialStore credentialStore,
     IConnectionStatusStore statusStore,
     HomeAssistantConnection connection,
-    KeepAwakeController keepAwakeController,
     IEnumerable<ICommandHandler> commandHandlers) : BackgroundService
 {
     private readonly SemaphoreSlim _reconnectSignal = new(0, 1);
@@ -62,7 +61,6 @@ public sealed class AgentWorker(
                 if (_settings.EnabledSensorGroups.GetValueOrDefault("system", true)) providers.Add(new SystemProvider(fast));
                 if (_settings.EnabledSensorGroups.GetValueOrDefault("audio", true)) providers.Add(new AudioProvider(fast));
                 if (_settings.EnabledSensorGroups.GetValueOrDefault("network", true)) providers.Add(new NetworkProvider(fast));
-                if (_settings.EnabledSensorGroups.GetValueOrDefault("keep_awake", true)) providers.Add(new KeepAwakeProvider(keepAwakeController, slow));
                 if (_settings.EnabledSensorGroups.GetValueOrDefault("storage", true)) providers.Add(new StorageProvider(slow));
                 _providers = providers;
 
@@ -118,18 +116,23 @@ public sealed class AgentWorker(
 
     private static IEnumerable<EntityDescriptor> BuildControlButtons(AgentSettings settings)
     {
-        foreach (var (key, platform, name, command, enabledByDefault) in new (string Key, string Platform, string Name, string Command, bool EnabledByDefault)[]
+        // Anything the user enabled locally is registered as enabled in HA (no greyed-out entities).
+        foreach (var (key, name, command) in new (string Key, string Name, string Command)[]
         {
-            ("lock", "button", "Lock", "system.lock", true),
-            ("sleep", "button", "Sleep", "system.sleep", true),
-            ("hibernate", "button", "Hibernate", "system.hibernate", false),
-            ("logoff", "button", "Log off", "system.logoff", false),
-            ("restart", "button", "Restart", "system.restart", false),
-            ("shutdown", "button", "Shut down", "system.shutdown", false)
+            ("lock", "Lock", "system.lock"),
+            ("sleep", "Sleep", "system.sleep"),
+            ("hibernate", "Hibernate", "system.hibernate"),
+            ("logoff", "Log off", "system.logoff"),
+            ("restart", "Restart", "system.restart"),
+            ("shutdown", "Shut down", "system.shutdown"),
+            ("display_off", "Turn display off", "system.display_off"),
+            ("abort_shutdown", "Cancel shutdown", "system.abort_shutdown"),
+            ("open_explorer", "Open File Explorer", "system.open_explorer"),
+            ("open_settings", "Open Settings", "system.open_settings")
         })
         {
             if (!settings.EnabledControls.GetValueOrDefault(command)) continue;
-            yield return new(key, platform, name, EnabledByDefault: enabledByDefault, Command: command);
+            yield return new(key, "button", name, EnabledByDefault: true, Command: command);
         }
     }
 
@@ -191,7 +194,6 @@ public sealed class AgentWorker(
                 IReadOnlyList<EntityState> payload;
                 if (seedTracker)
                 {
-                    // First sample after connect: publish everything and seed the change tracker.
                     _ = _changes.FilterChanged(states);
                     payload = states;
                     seedTracker = false;
@@ -210,7 +212,6 @@ public sealed class AgentWorker(
 
     private async Task HandleCommandAsync(string messageId, CommandRequest request)
     {
-        // Reload settings so allowlist/control toggles apply without waiting for reconnect mid-command.
         try { _settings = await settingsStore.LoadAsync(); } catch { /* keep cached settings */ }
 
         CommandResult result;

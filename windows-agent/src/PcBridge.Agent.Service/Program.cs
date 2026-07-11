@@ -19,8 +19,6 @@ try
     builder.Services.AddSingleton(new SettingsStore(dataDirectory));
     builder.Services.AddSingleton<ICredentialStore>(new DpapiCredentialStore(dataDirectory));
     builder.Services.AddSingleton<IConnectionStatusStore>(_ => new FileConnectionStatusStore(dataDirectory));
-    builder.Services.AddSingleton<KeepAwakeController>();
-    builder.Services.AddSingleton<ICommandHandler>(sp => sp.GetRequiredService<KeepAwakeController>());
     builder.Services.AddSingleton<ICommandHandler, AudioCommandHandler>();
     builder.Services.AddSingleton<ICommandHandler, PowerCommandHandler>();
     builder.Services.AddSingleton<ICommandHandler, ApplicationCommandHandler>();

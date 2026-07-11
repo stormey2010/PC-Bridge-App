@@ -5,7 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <Version>0.1.5</Version>
+    <Version>0.1.6</Version>
     <Authors>PC Bridge Agent Contributors</Authors>
     <Product>PC Bridge Agent</Product>
   </PropertyGroup>

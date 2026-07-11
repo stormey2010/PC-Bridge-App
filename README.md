@@ -58,7 +58,6 @@ If it does not connect, restart the **PC Bridge Agent** service from Windows Ser
 - CPU, memory, uptime, boot time, idle time, lock state, and power state
 - Network upload/download rate and local IP
 - Volume sensor/control, mute switch, and default audio output
-- Real Windows Power Request-based keep awake
 - Lock, sleep, hibernate, and log-off controls
 - Restart and shutdown controls, disabled locally by default
 - Allowlisted application launch buttons for Home Assistant

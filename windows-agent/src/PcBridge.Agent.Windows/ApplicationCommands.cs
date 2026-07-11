@@ -24,6 +24,7 @@ public sealed class ApplicationCommandHandler(SettingsStore settingsStore) : ICo
                 $"app_{Sanitize(app.Id)}",
                 "button",
                 app.Name,
+                EnabledByDefault: true,
                 Command: "app.launch",
                 CommandParameters: new Dictionary<string, object?> { ["app_id"] = app.Id }))
             .ToArray();
@@ -53,7 +54,7 @@ public sealed class CustomCommandHandler(SettingsStore settingsStore) : ICommand
                 $"cmd_{Sanitize(item.Id)}",
                 "button",
                 item.Name,
-                EnabledByDefault: false,
+                EnabledByDefault: true,
                 Command: "custom.run",
                 CommandParameters: new Dictionary<string, object?> { ["command_id"] = item.Id }))
             .ToArray();

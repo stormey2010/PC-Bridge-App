@@ -12,7 +12,7 @@ public sealed class AgentSettings
     public bool PrivacySensorsEnabled { get; set; }
     /// <summary>How often fast-changing sensors (CPU, memory, audio, network rates) are sampled.</summary>
     public int FastUpdateSeconds { get; set; } = 10;
-    /// <summary>How often slow-changing sensors (keep awake, disk, IP, boot time) are sampled.</summary>
+    /// <summary>How often slow-changing sensors (disk, IP) are sampled.</summary>
     public int StaticUpdateSeconds { get; set; } = 60;
     public int UnavailableTimeoutSeconds { get; set; } = 30;
     public Dictionary<string, bool> EnabledSensorGroups { get; set; } = new(StringComparer.OrdinalIgnoreCase)
@@ -20,7 +20,6 @@ public sealed class AgentSettings
         ["system"] = true,
         ["audio"] = true,
         ["network"] = true,
-        ["keep_awake"] = true,
         ["storage"] = true
     };
     public Dictionary<string, bool> EnabledControls { get; set; } = new(StringComparer.OrdinalIgnoreCase)
@@ -31,7 +30,10 @@ public sealed class AgentSettings
         ["system.logoff"] = false,
         ["system.restart"] = false,
         ["system.shutdown"] = false,
-        ["keep_awake.set"] = true,
+        ["system.display_off"] = true,
+        ["system.abort_shutdown"] = true,
+        ["system.open_explorer"] = true,
+        ["system.open_settings"] = true,
         ["audio.set_volume"] = true,
         ["audio.set_mute"] = true,
         ["app.launch"] = true,
@@ -99,6 +101,9 @@ public sealed class SettingsStore(string? baseDirectory = null)
             settings.EnabledControls.TryAdd(key, value);
         foreach (var (key, value) in new AgentSettings().EnabledSensorGroups)
             settings.EnabledSensorGroups.TryAdd(key, value);
+        // Drop removed features from older settings files.
+        settings.EnabledSensorGroups.Remove("keep_awake");
+        settings.EnabledControls.Remove("keep_awake.set");
         settings.FastUpdateSeconds = Math.Clamp(settings.FastUpdateSeconds, 5, 300);
         settings.StaticUpdateSeconds = Math.Clamp(settings.StaticUpdateSeconds, 30, 3600);
     }

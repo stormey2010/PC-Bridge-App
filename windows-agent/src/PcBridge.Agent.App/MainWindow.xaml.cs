@@ -106,7 +106,7 @@ public partial class MainWindow : Window
         metrics.Children.Add(Metric("CPU", _demo ? "18%" : "Live in HA", $"Fast · {_settings.FastUpdateSeconds}s", "#7568FF"));
         metrics.Children.Add(Metric("Memory", _demo ? "42%" : "Live in HA", "Change-filtered", "#41C7A5"));
         metrics.Children.Add(Metric("Volume", _demo ? "35%" : "Live in HA", "Default output", "#49A8FF"));
-        metrics.Children.Add(Metric("Keep awake", "Slow poll", $"{_settings.StaticUpdateSeconds}s · on change", "#F0A53A"));
+        metrics.Children.Add(Metric("Online", "Live in HA", "binary_sensor.online", "#F0A53A"));
         root.Children.Add(metrics);
         var lower = new Grid();
         lower.ColumnDefinitions.Add(new() { Width = new(2, GridUnitType.Star) });
@@ -161,10 +161,9 @@ public partial class MainWindow : Window
         var system = SensorToggle("system", "System", "CPU, memory, uptime, idle time, lock and power state");
         var audio = SensorToggle("audio", "Audio", "Volume, mute and default output device");
         var network = SensorToggle("network", "Network", "Local IP plus upload and download rate");
-        var keepAwake = SensorToggle("keep_awake", "Keep awake", "Keep-awake state — sampled on the slow interval");
         var storage = SensorToggle("storage", "Storage", "System drive free space — sampled on the slow interval");
-        return Page("Sensor settings", "Fast sensors update often. Slow sensors (keep awake, storage) update less often and only push when values change.",
-            system, audio, network, keepAwake, storage,
+        return Page("Sensor settings", "Fast sensors update often. Slow sensors (storage) update less often and only push when values change.",
+            system, audio, network, storage,
             Section("Hardware monitoring", "CPU/GPU temperature and fan speed", "Unavailable — no supported provider detected"),
             ActionBar(("Save sensor settings", SaveSensors_Click, true)));
     }
@@ -176,17 +175,20 @@ public partial class MainWindow : Window
         {
             ControlToggle("system.lock", "Lock", "Lock the current Windows session"),
             ControlToggle("system.sleep", "Sleep", "Put the PC into sleep mode"),
-            ControlToggle("system.hibernate", "Hibernate", "Hibernate the PC — disabled by default"),
-            ControlToggle("system.logoff", "Log off", "Sign out the current user — disabled by default"),
-            ControlToggle("system.restart", "Restart", "Destructive — disabled by default"),
-            ControlToggle("system.shutdown", "Shut down", "Destructive — disabled by default"),
+            ControlToggle("system.hibernate", "Hibernate", "Hibernate the PC — off by default"),
+            ControlToggle("system.logoff", "Log off", "Sign out the current user — off by default"),
+            ControlToggle("system.restart", "Restart", "Restart the PC — off by default"),
+            ControlToggle("system.shutdown", "Shut down", "Shut down the PC — off by default"),
+            ControlToggle("system.display_off", "Turn display off", "Blank the monitor"),
+            ControlToggle("system.abort_shutdown", "Cancel shutdown", "Abort a pending shutdown/restart"),
+            ControlToggle("system.open_explorer", "Open File Explorer", "Open Explorer on the PC"),
+            ControlToggle("system.open_settings", "Open Settings", "Open Windows Settings"),
             ControlToggle("audio.set_volume", "Volume control", "Allow Home Assistant to set volume"),
             ControlToggle("audio.set_mute", "Mute control", "Allow Home Assistant to mute or unmute"),
-            ControlToggle("keep_awake.set", "Keep awake", "Allow Home Assistant to manage keep-awake"),
             ControlToggle("app.launch", "Launch applications", "Allow Home Assistant to launch allowlisted apps"),
-            ControlToggle("custom.run", "Custom commands", "Allow Home Assistant to run allowlisted custom commands — disabled by default")
+            ControlToggle("custom.run", "Custom commands", "Allow Home Assistant to run allowlisted custom commands")
         };
-        return Page("Approved controls", "Disabled controls are rejected by the Windows agent even if Home Assistant sends them.",
+        return Page("Approved controls", "Turn a control on, save, and the agent reconnects. Enabled controls show as active buttons in Home Assistant (integration 0.1.6+).",
             controls.Append(ActionBar(("Save control settings", SaveControls_Click, true))).ToArray());
     }
 
@@ -273,7 +275,7 @@ public partial class MainWindow : Window
         intervalStack.Children.Add(Label("Update intervals", 16));
         intervalStack.Children.Add(Body("Fast sensors (CPU, memory, audio, network): seconds between samples. Only changed values are pushed."));
         intervalStack.Children.Add(_fastIntervalBox);
-        intervalStack.Children.Add(Body("Slow sensors (keep awake, storage): seconds between samples."));
+        intervalStack.Children.Add(Body("Slow sensors (storage): seconds between samples."));
         intervalStack.Children.Add(_staticIntervalBox);
         intervals.Child = intervalStack;
 
@@ -437,8 +439,8 @@ public partial class MainWindow : Window
             RequiresElevation = elevate,
             Enabled = true
         });
-        if (!_settings.EnabledControls.GetValueOrDefault("custom.run"))
-            MessageBox.Show("Custom commands are still disabled on the Controls page. Enable “Custom commands” there before Home Assistant can run them.", "Enable control", MessageBoxButton.OK, MessageBoxImage.Information);
+        _settings.EnabledControls["custom.run"] = true;
+        MessageBox.Show("Custom command saved and “Custom commands” was enabled on the Controls page. Home Assistant will show a new button after the agent reconnects (HA integration 0.1.6+).", "Command added", MessageBoxButton.OK, MessageBoxImage.Information);
         await _settingsStore.SaveAsync(_settings);
         PageContent.Content = BuildCommands();
     }
