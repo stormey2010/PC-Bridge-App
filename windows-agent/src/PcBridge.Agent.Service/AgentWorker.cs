@@ -37,7 +37,13 @@ public sealed class AgentWorker(
             return;
         }
 
-        _providers = [new SystemProvider(TimeSpan.FromSeconds(Math.Max(2, _settings.FastUpdateSeconds))), new AudioProvider(TimeSpan.FromSeconds(Math.Max(2, _settings.FastUpdateSeconds))), new NetworkProvider(TimeSpan.FromSeconds(Math.Max(2, _settings.FastUpdateSeconds))), new KeepAwakeProvider(keepAwakeController, TimeSpan.FromSeconds(Math.Max(2, _settings.FastUpdateSeconds)))];
+        var updateInterval = TimeSpan.FromSeconds(Math.Max(2, _settings.FastUpdateSeconds));
+        var providers = new List<ISensorProvider>();
+        if (_settings.EnabledSensorGroups.GetValueOrDefault("system", true)) providers.Add(new SystemProvider(updateInterval));
+        if (_settings.EnabledSensorGroups.GetValueOrDefault("audio", true)) providers.Add(new AudioProvider(updateInterval));
+        if (_settings.EnabledSensorGroups.GetValueOrDefault("network", true)) providers.Add(new NetworkProvider(updateInterval));
+        if (_settings.EnabledSensorGroups.GetValueOrDefault("keep_awake", true)) providers.Add(new KeepAwakeProvider(keepAwakeController, updateInterval));
+        _providers = providers;
         _commands = commandHandlers.SelectMany(handler => handler.Commands.Select(command => (command, handler))).ToDictionary(item => item.command, item => item.handler, StringComparer.OrdinalIgnoreCase);
         connection.CommandReceived += HandleCommandAsync;
         NetworkChange.NetworkAvailabilityChanged += OnNetworkChanged;

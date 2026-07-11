@@ -1,5 +1,5 @@
 #define MyAppName "PC Bridge Agent"
-#define MyAppVersion "0.1.0"
+#define MyAppVersion "0.1.1"
 #define MyAppPublisher "PC Bridge Agent Contributors"
 #define PublishRoot "..\artifacts\publish"
 
@@ -32,6 +32,10 @@ Name: "launch"; Description: "Open PC Bridge Agent after installation"; GroupDes
 [Files]
 Source: "{#PublishRoot}\app\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#PublishRoot}\service\*"; DestDir: "{app}\service"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+[Dirs]
+Name: "{commonappdata}\PC Bridge Agent"; Permissions: users-modify
+Name: "{commonappdata}\PC Bridge Agent\logs"; Permissions: users-modify
 
 [Icons]
 Name: "{group}\PC Bridge Agent"; Filename: "{app}\PcBridge.Agent.exe"
