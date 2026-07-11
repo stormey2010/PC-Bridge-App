@@ -13,6 +13,13 @@ public sealed class AgentSettings
     public int FastUpdateSeconds { get; set; } = 5;
     public int StaticUpdateSeconds { get; set; } = 60;
     public int UnavailableTimeoutSeconds { get; set; } = 30;
+    public Dictionary<string, bool> EnabledSensorGroups { get; set; } = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["system"] = true,
+        ["audio"] = true,
+        ["network"] = true,
+        ["keep_awake"] = true
+    };
     public Dictionary<string, bool> EnabledControls { get; set; } = new(StringComparer.OrdinalIgnoreCase)
     {
         ["system.lock"] = true,

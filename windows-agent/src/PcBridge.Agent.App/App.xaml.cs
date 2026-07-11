@@ -25,6 +25,6 @@ public partial class App : Application
             if (setup.ShowDialog() != true) { Shutdown(); return; }
             settings = await settingsStore.LoadAsync();
         }
-        new MainWindow(settings, demo).Show();
+        new MainWindow(settings, settingsStore, credentials, demo).Show();
     }
 }
