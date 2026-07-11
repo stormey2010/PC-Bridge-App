@@ -18,7 +18,7 @@ try
     builder.Services.AddSerilog();
     builder.Services.AddSingleton(new SettingsStore(dataDirectory));
     builder.Services.AddSingleton<ICredentialStore>(new DpapiCredentialStore(dataDirectory));
-    builder.Services.AddSingleton<IConnectionStatusStore, ConnectionStatusStore>();
+    builder.Services.AddSingleton<IConnectionStatusStore>(_ => new FileConnectionStatusStore(dataDirectory));
     builder.Services.AddSingleton<KeepAwakeController>();
     builder.Services.AddSingleton<ICommandHandler>(sp => sp.GetRequiredService<KeepAwakeController>());
     builder.Services.AddSingleton<ICommandHandler, AudioCommandHandler>();

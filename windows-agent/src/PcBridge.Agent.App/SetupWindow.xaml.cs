@@ -42,7 +42,7 @@ public partial class SetupWindow : Window
         _settings.HomeAssistantUrl = UrlBox.Text.Trim().TrimEnd('/');
         _settings.DeviceName = string.IsNullOrWhiteSpace(DeviceBox.Text) ? Environment.MachineName : DeviceBox.Text.Trim();
         _settings.PrivacySensorsEnabled = PrivacyBox.IsChecked == true;
-        if (!string.IsNullOrWhiteSpace(TokenBox.Password)) await _credentials.SaveTokenAsync(_validatedToken);
+        await _credentials.SaveTokenAsync(_validatedToken);
         TokenBox.Clear();
         await _settingsStore.SaveAsync(_settings);
         DialogResult = true;

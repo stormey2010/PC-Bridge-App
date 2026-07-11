@@ -1,6 +1,6 @@
 # Troubleshooting
 
-Logs are in `%ProgramData%\PC Bridge Agent\logs` and rotate daily/at 10 MB, with 14 files retained.
+Logs are in `%ProgramData%\PC Bridge Agent\logs` and rotate daily/at 10 MB, with 14 files retained. Live connection status is also written to `%ProgramData%\PC Bridge Agent\status.json` for the desktop app.
 
 ## Cannot authenticate
 
@@ -9,6 +9,18 @@ Create a new long-lived token in the Home Assistant user profile, replace the lo
 ## Cannot connect
 
 Open the Home Assistant URL from the PC. Reverse proxies must support WebSocket upgrade for `/api/websocket`. Use a certificate trusted by Windows; PC Bridge does not disable TLS validation. No Windows firewall inbound rule is needed.
+
+## Test connection succeeds but entities never appear
+
+Install and enable the **PC Bridge** Home Assistant integration first, then restart Home Assistant. The Windows app now probes for the integration during Test connection — if it is missing you will see an explicit error instead of a false success.
+
+## Service restart fails from the app
+
+Use **Restart agent** again after approving the UAC prompt. The app waits for Windows to fully stop and start **PC Bridge Agent**. If it still fails, open `services.msc`, restart the service manually, then check the logs folder.
+
+## Settings changed but Home Assistant still looks old
+
+Saving connection, sensor, or control settings writes `%ProgramData%\PC Bridge Agent\settings.json`. The service watches that file and reconnects automatically. If status stays stuck, use **Restart agent**.
 
 ## Service does not start
 

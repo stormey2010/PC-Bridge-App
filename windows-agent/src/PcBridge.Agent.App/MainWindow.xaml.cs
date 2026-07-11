@@ -6,6 +6,7 @@ using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Shapes;
+using System.Windows.Threading;
 using Microsoft.Win32;
 using PcBridge.Agent.Core;
 using PcBridge.Agent.Windows;
@@ -21,8 +22,10 @@ public partial class MainWindow : Window
     private readonly bool _demo;
     private readonly Dictionary<string, CheckBox> _sensorChecks = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, CheckBox> _controlChecks = new(StringComparer.OrdinalIgnoreCase);
+    private readonly DispatcherTimer _statusTimer;
     private CheckBox? _privacyCheck;
     private CheckBox? _startupCheck;
+    private readonly string _dataDirectory = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "PC Bridge Agent");
 
     public MainWindow(AgentSettings settings, SettingsStore settingsStore, ICredentialStore credentials, bool demo = false)
     {
@@ -33,6 +36,10 @@ public partial class MainWindow : Window
         _demo = demo;
         PageContent.Content = BuildOverview();
         RefreshServiceStatus();
+        _statusTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
+        _statusTimer.Tick += (_, _) => RefreshServiceStatus();
+        _statusTimer.Start();
+        Closed += (_, _) => _statusTimer.Stop();
     }
 
     private void Navigate_Click(object sender, RoutedEventArgs e)
@@ -58,6 +65,7 @@ public partial class MainWindow : Window
 
     private FrameworkElement BuildOverview()
     {
+        var snapshot = ReadConnectionSnapshot();
         var root = Stack();
         root.Children.Add(Heading(_settings.DeviceName, "Your Windows PC, connected without opening an inbound port."));
         var hero = Card();
@@ -67,7 +75,9 @@ public partial class MainWindow : Window
         var identity = Stack();
         identity.Children.Add(Label("HOME ASSISTANT", 11, "#A5A3B5"));
         identity.Children.Add(Label(string.IsNullOrWhiteSpace(_settings.HomeAssistantUrl) ? "Not configured" : _settings.HomeAssistantUrl, 16));
-        identity.Children.Add(Badge("●  Configuration managed locally", "#1E4A3E", "#73E2B9"));
+        identity.Children.Add(Badge(StatusBadgeText(snapshot), StatusBadgeBackground(snapshot), StatusBadgeForeground(snapshot)));
+        if (!string.IsNullOrWhiteSpace(snapshot?.FriendlyError) && snapshot.Status != ConnectionStatus.Connected)
+            identity.Children.Add(Body(snapshot.FriendlyError));
         heroGrid.Children.Add(identity);
         var actions = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
         foreach (var action in new[] { "Lock", "Sleep", "Restart", "Shut down" }) actions.Children.Add(ActionButton(action));
@@ -87,7 +97,7 @@ public partial class MainWindow : Window
         var activity = Card();
         var activityContent = Stack();
         activityContent.Children.Add(Label("Get started", 16));
-        activityContent.Children.Add(Body("Edit the Home Assistant connection, choose Sensors and Controls, then restart the agent when prompted."));
+        activityContent.Children.Add(Body("Edit the Home Assistant connection and choose Sensors and Controls. The agent reloads settings automatically; use Restart agent only if the service is stuck."));
         activity.Child = activityContent;
         lower.Children.Add(activity);
         var security = Card();
@@ -103,6 +113,7 @@ public partial class MainWindow : Window
 
     private FrameworkElement BuildConnection()
     {
+        var snapshot = ReadConnectionSnapshot();
         var actions = ActionBar(
             ("Edit connection", EditConnection_Click, true),
             ("Test saved connection", TestConnection_Click, false),
@@ -111,10 +122,12 @@ public partial class MainWindow : Window
         return Page("Home Assistant connection", "Edit and validate the URL, credential, and PC name here.",
             Row("Server", string.IsNullOrWhiteSpace(_settings.HomeAssistantUrl) ? "Not configured" : _settings.HomeAssistantUrl),
             Row("PC name", _settings.DeviceName),
+            Row("Live status", StatusLabel(snapshot)),
+            Row("Last connected", snapshot?.LastConnected is null ? "Never" : snapshot.LastConnected.Value.ToLocalTime().ToString("g")),
             Row("Installation ID", _settings.InstallationId),
             Row("Protocol", "Version 1"),
             Row("Authentication", "Credential protected by Windows DPAPI"),
-            actions);
+            string.IsNullOrWhiteSpace(snapshot?.FriendlyError) ? actions : StackWith(Body(snapshot!.FriendlyError!), actions));
     }
 
     private FrameworkElement BuildSensorPage()
@@ -124,7 +137,7 @@ public partial class MainWindow : Window
         var audio = SensorToggle("audio", "Audio", "Volume, mute and default output device");
         var network = SensorToggle("network", "Network", "Local IP plus upload and download rate");
         var keepAwake = SensorToggle("keep_awake", "Keep awake", "Keep-awake state, reason and remaining time");
-        return Page("Sensor settings", "Choose which sensor groups the background agent registers. Changes apply after an agent restart.",
+        return Page("Sensor settings", "Choose which sensor groups the background agent registers. Changes apply automatically within a few seconds.",
             system, audio, network, keepAwake,
             Section("Hardware monitoring", "CPU/GPU temperature and fan speed", "Unavailable — no supported provider detected"),
             ActionBar(("Save sensor settings", SaveSensors_Click, true)));
@@ -205,14 +218,14 @@ public partial class MainWindow : Window
         };
     }
 
-    private async void EditConnection_Click(object sender, RoutedEventArgs e)
+    private void EditConnection_Click(object sender, RoutedEventArgs e)
     {
         var editor = new SetupWindow(_settingsStore, _credentials, _settings) { Owner = this };
         if (editor.ShowDialog() == true)
         {
             PageContent.Content = BuildConnection();
-            if (MessageBox.Show("Connection saved. Restart the background agent now?", "Restart agent", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
-                await RestartServiceElevatedAsync();
+            RefreshServiceStatus();
+            MessageBox.Show("Connection saved. The background agent will reconnect automatically within a few seconds.", "Connection saved", MessageBoxButton.OK, MessageBoxImage.Information);
         }
     }
 
@@ -222,7 +235,7 @@ public partial class MainWindow : Window
         {
             var token = await _credentials.GetTokenAsync() ?? string.Empty;
             await HomeAssistantConnectionValidator.ValidateAsync(_settings.HomeAssistantUrl, token);
-            MessageBox.Show("Home Assistant accepted the saved URL and credential.", "Connection successful", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show("Home Assistant accepted the saved URL and credential, and the PC Bridge integration is available.", "Connection successful", MessageBoxButton.OK, MessageBoxImage.Information);
         }
         catch (UnauthorizedAccessException)
         {
@@ -275,8 +288,9 @@ public partial class MainWindow : Window
     private async Task SaveAndOfferRestartAsync(string message)
     {
         await _settingsStore.SaveAsync(_settings);
-        if (MessageBox.Show($"{message}\n\nRestart the background agent now to apply it?", "Settings saved", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
-            await RestartServiceElevatedAsync();
+        MessageBox.Show($"{message}\n\nThe background agent will reload these settings automatically.", "Settings saved", MessageBoxButton.OK, MessageBoxImage.Information);
+        RefreshServiceStatus();
+        await Task.CompletedTask;
     }
 
     private async Task RestartServiceElevatedAsync()
@@ -284,9 +298,30 @@ public partial class MainWindow : Window
         if (_demo) { MessageBox.Show("Demo: agent service restarted.", "PC Bridge Agent"); return; }
         try
         {
-            await RunElevatedAsync("cmd.exe", $"/c sc.exe stop \"{ServiceName}\" >nul 2>&1 & timeout /t 2 /nobreak >nul & sc.exe start \"{ServiceName}\"");
+            // PowerShell waits for stop/start correctly; the old sc+timeout chain often failed mid-restart.
+            const string script = """
+$ErrorActionPreference = 'Stop'
+$name = 'PC Bridge Agent'
+$svc = Get-Service -Name $name -ErrorAction Stop
+if ($svc.Status -ne 'Stopped') {
+  Stop-Service -Name $name -Force -ErrorAction Stop
+  $svc.WaitForStatus('Stopped', '00:00:45')
+}
+Start-Service -Name $name -ErrorAction Stop
+$svc.Refresh()
+$svc.WaitForStatus('Running', '00:00:45')
+if ($svc.Status -ne 'Running') { throw "Service status is $($svc.Status)" }
+""";
+            var encoded = Convert.ToBase64String(System.Text.Encoding.Unicode.GetBytes(script));
+            await RunElevatedAsync("powershell.exe", $"-NoProfile -ExecutionPolicy Bypass -EncodedCommand {encoded}");
+            await Task.Delay(1500);
             RefreshServiceStatus();
-            MessageBox.Show("The PC Bridge Agent service was restarted.", "Agent restarted", MessageBoxButton.OK, MessageBoxImage.Information);
+            var snapshot = ReadConnectionSnapshot();
+            MessageBox.Show(
+                snapshot?.Status == ConnectionStatus.Connected
+                    ? "The PC Bridge Agent service was restarted and is connected to Home Assistant."
+                    : "The PC Bridge Agent service was restarted. Live connection status will update in a few seconds.",
+                "Agent restarted", MessageBoxButton.OK, MessageBoxImage.Information);
         }
         catch (Win32Exception ex) when (ex.NativeErrorCode == 1223)
         {
@@ -313,9 +348,60 @@ public partial class MainWindow : Window
     private void RefreshServiceStatus()
     {
         var running = _demo || IsServiceRunning();
-        AgentStatusText.Text = running ? "Agent service running" : "Agent service stopped";
-        AgentStatusDot.Fill = new SolidColorBrush((Color)ColorConverter.ConvertFromString(running ? "#44D19D" : "#F06D6D"));
+        var snapshot = ReadConnectionSnapshot();
+        if (_demo)
+        {
+            AgentStatusText.Text = "Demo mode";
+            AgentStatusDot.Fill = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#44D19D"));
+            return;
+        }
+        if (!running)
+        {
+            AgentStatusText.Text = "Agent service stopped";
+            AgentStatusDot.Fill = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#F06D6D"));
+            return;
+        }
+        AgentStatusText.Text = snapshot?.Status switch
+        {
+            ConnectionStatus.Connected => "Connected to Home Assistant",
+            ConnectionStatus.Connecting => "Connecting to Home Assistant…",
+            ConnectionStatus.AuthenticationFailed => "Authentication failed",
+            ConnectionStatus.Incompatible => "HA integration missing/incompatible",
+            _ => "Agent running — waiting for HA"
+        };
+        AgentStatusDot.Fill = new SolidColorBrush((Color)ColorConverter.ConvertFromString(snapshot?.Status switch
+        {
+            ConnectionStatus.Connected => "#44D19D",
+            ConnectionStatus.Connecting => "#F0A53A",
+            ConnectionStatus.AuthenticationFailed or ConnectionStatus.Incompatible => "#F06D6D",
+            _ => "#F0A53A"
+        }));
     }
+
+    private ConnectionSnapshot? ReadConnectionSnapshot() =>
+        _demo ? new ConnectionSnapshot(ConnectionStatus.Connected, DateTimeOffset.UtcNow) : FileConnectionStatusStore.TryRead(_dataDirectory);
+
+    private static string StatusLabel(ConnectionSnapshot? snapshot) => snapshot?.Status switch
+    {
+        ConnectionStatus.Connected => "Connected",
+        ConnectionStatus.Connecting => "Connecting",
+        ConnectionStatus.AuthenticationFailed => "Authentication failed",
+        ConnectionStatus.Incompatible => "Integration missing or incompatible",
+        ConnectionStatus.Disconnected => "Disconnected",
+        _ => "Unknown"
+    };
+
+    private static string StatusBadgeText(ConnectionSnapshot? snapshot) => snapshot?.Status switch
+    {
+        ConnectionStatus.Connected => "●  Connected to Home Assistant",
+        ConnectionStatus.Connecting => "●  Connecting…",
+        ConnectionStatus.AuthenticationFailed => "●  Authentication failed",
+        ConnectionStatus.Incompatible => "●  Install PC Bridge in Home Assistant",
+        _ => "●  Waiting for Home Assistant"
+    };
+
+    private static string StatusBadgeBackground(ConnectionSnapshot? snapshot) => snapshot?.Status == ConnectionStatus.Connected ? "#1E4A3E" : "#4A1E1E";
+    private static string StatusBadgeForeground(ConnectionSnapshot? snapshot) => snapshot?.Status == ConnectionStatus.Connected ? "#73E2B9" : "#F0A0A0";
 
     private static bool IsServiceRunning()
     {
@@ -334,6 +420,7 @@ public partial class MainWindow : Window
     {
         var dialog = new SaveFileDialog { FileName = $"pc-bridge-diagnostics-{DateTime.Now:yyyyMMdd-HHmmss}.json", Filter = "JSON diagnostics|*.json" };
         if (dialog.ShowDialog(this) != true) return;
+        var snapshot = ReadConnectionSnapshot();
         var diagnostics = new
         {
             generated_at = DateTimeOffset.UtcNow,
@@ -341,6 +428,8 @@ public partial class MainWindow : Window
             installation_id = _settings.InstallationId,
             home_assistant_configured = !string.IsNullOrWhiteSpace(_settings.HomeAssistantUrl),
             service_running = IsServiceRunning(),
+            connection_status = snapshot?.Status.ToString(),
+            last_connected = snapshot?.LastConnected,
             sensor_groups = _settings.EnabledSensorGroups,
             enabled_controls = _settings.EnabledControls.Where(item => item.Value).Select(item => item.Key).ToArray(),
             privacy_sensors_enabled = _settings.PrivacySensorsEnabled,
@@ -353,7 +442,7 @@ public partial class MainWindow : Window
     private void OpenServices_Click(object sender, RoutedEventArgs e) => Process.Start(new ProcessStartInfo("services.msc") { UseShellExecute = true });
     private void OpenLogs_Click(object sender, RoutedEventArgs e)
     {
-        var path = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "PC Bridge Agent", "logs");
+        var path = System.IO.Path.Combine(_dataDirectory, "logs");
         System.IO.Directory.CreateDirectory(path);
         Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
     }
@@ -370,6 +459,7 @@ public partial class MainWindow : Window
     }
 
     private static StackPanel Stack() => new() { Margin = new Thickness(0) };
+    private static FrameworkElement StackWith(params FrameworkElement[] children) { var stack = Stack(); foreach (var child in children) stack.Children.Add(child); return stack; }
     private static Border Card() => new() { Style = (Style)Application.Current.Resources["Card"] };
     private static TextBlock Label(string text, double size = 14, string color = "#F5F4FA") => new() { Text = text, FontSize = size, Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(color)), TextWrapping = TextWrapping.Wrap };
     private static TextBlock Body(string text) => new() { Text = text, Foreground = new SolidColorBrush(Color.FromRgb(165, 163, 181)), FontSize = 13, LineHeight = 25, Margin = new Thickness(0, 10, 0, 0), TextWrapping = TextWrapping.Wrap };

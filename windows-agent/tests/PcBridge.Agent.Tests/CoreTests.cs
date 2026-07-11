@@ -69,4 +69,20 @@ public sealed class CoreTests
         Assert.False(settings.EnabledControls["system.shutdown"]);
         Assert.True(settings.EnabledControls["system.lock"]);
     }
+
+    [Fact]
+    public void FileConnectionStatusStoreRoundTripsSnapshot()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "pc-bridge-tests", Guid.NewGuid().ToString("N"));
+        try
+        {
+            var store = new FileConnectionStatusStore(directory);
+            store.Set(new ConnectionSnapshot(ConnectionStatus.Connected, DateTimeOffset.UnixEpoch, null));
+            var loaded = FileConnectionStatusStore.TryRead(directory);
+            Assert.NotNull(loaded);
+            Assert.Equal(ConnectionStatus.Connected, loaded!.Status);
+            Assert.Equal(DateTimeOffset.UnixEpoch, loaded.LastConnected);
+        }
+        finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+    }
 }

@@ -31,6 +31,44 @@ internal static class HomeAssistantConnectionValidator
         using var result = await ReceiveAsync(socket, timeout.Token);
         if (result.RootElement.GetProperty("type").GetString() != "auth_ok")
             throw new UnauthorizedAccessException("Home Assistant rejected the saved credential.");
+
+        // Probe for the PC Bridge integration without registering a live agent session.
+        var probe = JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            id = 1,
+            type = "pc_bridge/register_agent",
+            protocol_version = 1,
+            registration = new { }
+        });
+        await socket.SendAsync(probe, WebSocketMessageType.Text, true, timeout.Token);
+        using var probeResult = await ReceiveResultAsync(socket, 1, timeout.Token);
+        if (!probeResult.RootElement.TryGetProperty("success", out var success) || success.GetBoolean())
+            return;
+        var code = probeResult.RootElement.TryGetProperty("error", out var error) && error.TryGetProperty("code", out var codeElement)
+            ? codeElement.GetString()
+            : null;
+        if (string.Equals(code, "unknown_command", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Home Assistant accepted the credential, but the PC Bridge integration is not installed or not loaded. Install PC Bridge in Home Assistant, restart HA, then try again.");
+        if (string.Equals(code, "incompatible_version", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Home Assistant has PC Bridge installed, but the protocol version does not match this agent.");
+        // invalid_format / message_too_large means the integration is present — connection is good.
+    }
+
+    private static async Task<JsonDocument> ReceiveResultAsync(ClientWebSocket socket, int requestId, CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            var message = await ReceiveAsync(socket, cancellationToken);
+            var root = message.RootElement;
+            if (root.TryGetProperty("type", out var type) && type.GetString() == "event")
+            {
+                message.Dispose();
+                continue;
+            }
+            if (root.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.Number && id.GetInt32() == requestId)
+                return message;
+            message.Dispose();
+        }
     }
 
     private static async Task<JsonDocument> ReceiveAsync(ClientWebSocket socket, CancellationToken cancellationToken)

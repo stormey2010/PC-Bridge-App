@@ -1,5 +1,4 @@
 using System.Net.WebSockets;
-using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using PcBridge.Agent.Core;
@@ -15,7 +14,7 @@ public sealed class HomeAssistantConnection(ILogger<HomeAssistantConnection> log
 
     public async Task ConnectAsync(Uri baseUri, string token, AgentRegistration registration, CancellationToken cancellationToken)
     {
-        _socket?.Dispose();
+        await DisposeSocketAsync();
         statusStore.Set(new(ConnectionStatus.Connecting, statusStore.Current.LastConnected));
         var builder = new UriBuilder(baseUri) { Scheme = baseUri.Scheme == "https" ? "wss" : "ws", Path = "/api/websocket", Query = string.Empty };
         _socket = new ClientWebSocket();
@@ -34,13 +33,21 @@ public sealed class HomeAssistantConnection(ILogger<HomeAssistantConnection> log
         if (authType != "auth_ok") throw new ProtocolException("Unexpected authentication response.");
 
         var registrationId = await SendCommandAsync("pc_bridge/register_agent", new { protocol_version = Protocol.Version, registration }, cancellationToken);
-        using var registrationResult = await ReceiveJsonAsync(cancellationToken);
+        using var registrationResult = await ReceiveResultAsync(registrationId, cancellationToken);
         var registrationRoot = registrationResult.RootElement;
-        if (!registrationRoot.TryGetProperty("id", out var responseId) || responseId.GetInt32() != registrationId ||
-            registrationRoot.GetProperty("type").GetString() != "result" || !registrationRoot.GetProperty("success").GetBoolean())
+        if (registrationRoot.GetProperty("type").GetString() != "result" || !registrationRoot.GetProperty("success").GetBoolean())
         {
-            statusStore.Set(new(ConnectionStatus.Incompatible, statusStore.Current.LastConnected, "This PC Bridge Agent version is not compatible with the installed Home Assistant integration."));
-            throw new ProtocolException("Home Assistant rejected agent registration.");
+            var detail = TryReadError(registrationRoot) ?? "Home Assistant rejected agent registration.";
+            var incompatible = detail.Contains("unknown_command", StringComparison.OrdinalIgnoreCase)
+                || detail.Contains("not found", StringComparison.OrdinalIgnoreCase)
+                || detail.Contains("incompatible", StringComparison.OrdinalIgnoreCase);
+            statusStore.Set(new(
+                incompatible ? ConnectionStatus.Incompatible : ConnectionStatus.Disconnected,
+                statusStore.Current.LastConnected,
+                incompatible
+                    ? "The PC Bridge integration is missing or incompatible in Home Assistant. Install/update PC Bridge, then restart the agent."
+                    : detail));
+            throw new ProtocolException(detail);
         }
         statusStore.Set(new(ConnectionStatus.Connected, DateTimeOffset.UtcNow));
         logger.LogInformation("Connected to Home Assistant as installation {InstallationId}", registration.InstallationId);
@@ -91,6 +98,23 @@ public sealed class HomeAssistantConnection(ILogger<HomeAssistantConnection> log
         finally { _sendLock.Release(); }
     }
 
+    private async Task<JsonDocument> ReceiveResultAsync(int requestId, CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            var message = await ReceiveJsonAsync(cancellationToken);
+            var root = message.RootElement;
+            if (root.TryGetProperty("type", out var type) && type.GetString() == "event")
+            {
+                message.Dispose();
+                continue;
+            }
+            if (root.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.Number && id.GetInt32() == requestId)
+                return message;
+            message.Dispose();
+        }
+    }
+
     private async Task<JsonDocument> ReceiveJsonAsync(CancellationToken cancellationToken)
     {
         if (_socket is null) throw new WebSocketException("Socket is not initialized.");
@@ -108,11 +132,32 @@ public sealed class HomeAssistantConnection(ILogger<HomeAssistantConnection> log
         return await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
     }
 
+    private static string? TryReadError(JsonElement root)
+    {
+        if (!root.TryGetProperty("error", out var error)) return null;
+        var code = error.TryGetProperty("code", out var codeElement) ? codeElement.GetString() : null;
+        var message = error.TryGetProperty("message", out var messageElement) ? messageElement.GetString() : null;
+        if (string.IsNullOrWhiteSpace(code) && string.IsNullOrWhiteSpace(message)) return null;
+        return string.IsNullOrWhiteSpace(code) ? message : string.IsNullOrWhiteSpace(message) ? code : $"{code}: {message}";
+    }
+
+    private async Task DisposeSocketAsync()
+    {
+        if (_socket is null) return;
+        try
+        {
+            if (_socket.State == WebSocketState.Open)
+                await _socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Agent reconnecting", CancellationToken.None);
+        }
+        catch { /* ignore close failures during reconnect */ }
+        _socket.Dispose();
+        _socket = null;
+    }
+
     public async ValueTask DisposeAsync()
     {
-        if (_socket?.State == WebSocketState.Open)
-            await _socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Agent stopping", CancellationToken.None);
-        _socket?.Dispose(); _sendLock.Dispose();
+        await DisposeSocketAsync();
+        _sendLock.Dispose();
     }
 }
 

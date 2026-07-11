@@ -48,8 +48,8 @@ The token is encrypted with Windows DPAPI and is never placed in `settings.json`
 ### 4. Verify it is working
 
 1. Open **Settings → Devices & services → PC Bridge** in Home Assistant.
-2. Your Windows PC should appear as a device.
-3. Open the **PC Bridge** item in the Home Assistant sidebar for the dashboard.
+2. Your Windows PC should appear as a device with its entities.
+3. Use **Configure** on the integration for options, or **Download diagnostics** for redacted logs.
 
 If it does not connect, restart the **PC Bridge Agent** service from Windows Services and check `%ProgramData%\PC Bridge Agent\logs`.
 
